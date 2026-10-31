@@ -1,0 +1,84 @@
+name: Build Windows Installer
+
+# Gera o instalador "System PDV PRO_2.0.0_x64-setup.exe" (Tauri 2 / NSIS)
+# com o servidor Node + SQLite e o runtime Node embutidos.
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+env:
+  # O Node usado para INSTALAR o better-sqlite3 precisa ter a MESMA versao
+  # (mesmo ABI) do node.exe que vai embutido no instalador.
+  NODE_VERSION: "20.18.1"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Instalar dependencias do app (Tauri CLI)
+        run: npm install
+
+      - name: Instalar dependencias do servidor (compila better-sqlite3 win-x64)
+        run: npm install --omit=dev
+        working-directory: server
+
+      - name: Montar recursos embutidos (node.exe + servidor)
+        shell: pwsh
+        run: |
+          $res = "src-tauri/resources"
+          New-Item -ItemType Directory -Force -Path $res | Out-Null
+          New-Item -ItemType Directory -Force -Path "$res/server" | Out-Null
+
+          # 1) Runtime Node.js (standalone node.exe) na mesma versao do build.
+          $nodeUrl = "https://nodejs.org/dist/v$env:NODE_VERSION/win-x64/node.exe"
+          Write-Host "Baixando $nodeUrl"
+          Invoke-WebRequest -Uri $nodeUrl -OutFile "$res/node.exe"
+
+          # 2) Servidor + dependencias.
+          Copy-Item server/server.js   "$res/server/server.js"   -Force
+          Copy-Item server/schema.js   "$res/server/schema.js"   -Force
+          Copy-Item server/package.json "$res/server/package.json" -Force
+          Copy-Item server/node_modules "$res/server/node_modules" -Recurse -Force
+
+          Write-Host "Conteudo de $res"
+          Get-ChildItem $res -Recurse -Depth 1 | Select-Object FullName
+
+      - name: Build Tauri (NSIS installer)
+        run: npm run build
+
+      - name: Listar artefatos gerados
+        shell: pwsh
+        run: Get-ChildItem -Recurse src-tauri/target/release/bundle | Select-Object FullName
+
+      - name: Upload instalador
+        uses: actions/upload-artifact@v4
+        with:
+          name: System-PDV-PRO-setup
+          path: |
+            src-tauri/target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+
+      - name: Publicar release (em tags v*)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: src-tauri/target/release/bundle/nsis/*-setup.exe

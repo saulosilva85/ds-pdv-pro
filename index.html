@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<title>System PDV PRO — Setup</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    --bg: #f4f6fb;
+    --card: #ffffff;
+    --primary: #2563eb;
+    --primary-dark: #1d4ed8;
+    --success: #16a34a;
+    --danger: #dc2626;
+    --warn: #ca8a04;
+    --text: #0f172a;
+    --muted: #64748b;
+    --border: #e2e8f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 50%, #2563eb 100%);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+  }
+  .wrapper { width: 100%; max-width: 720px; }
+  .card { background: var(--card); border-radius: 16px; padding: 2.5rem; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.4); }
+  h1 { margin: 0 0 0.25rem; font-size: 1.75rem; color: var(--primary); }
+  .subtitle { margin: 0 0 2rem; color: var(--muted); }
+  .modes { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1.5rem; }
+  .mode { border: 2px solid var(--border); border-radius: 12px; padding: 1.5rem; cursor: pointer; transition: all 0.2s; background: white; }
+  .mode:hover { border-color: var(--primary); transform: translateY(-2px); box-shadow: 0 10px 20px rgba(37, 99, 235, 0.1); }
+  .mode.active { border-color: var(--primary); background: #eff6ff; }
+  .mode h3 { margin: 0 0 0.5rem; font-size: 1.1rem; }
+  .mode p { margin: 0; font-size: 0.85rem; color: var(--muted); line-height: 1.4; }
+  .icon { font-size: 2rem; margin-bottom: 0.5rem; }
+  .form-row { margin-bottom: 1rem; }
+  label { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 0.35rem; font-weight: 600; }
+  input[type="text"] { width: 100%; padding: 0.75rem; border: 1px solid var(--border); border-radius: 8px; font-size: 1rem; font-family: inherit; }
+  input[type="text"]:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
+  .actions { display: flex; gap: 0.75rem; margin-top: 1.5rem; }
+  button { flex: 1; padding: 0.85rem 1.25rem; border: none; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer; transition: all 0.15s; font-family: inherit; }
+  .btn-primary { background: var(--primary); color: white; }
+  .btn-primary:hover { background: var(--primary-dark); }
+  .btn-primary:disabled { background: #94a3b8; cursor: not-allowed; }
+  .btn-secondary { background: white; color: var(--text); border: 1px solid var(--border); }
+  .btn-secondary:hover { background: #f8fafc; }
+  #serverFields { display: none; }
+  .status { margin-top: 0.75rem; padding: 0.65rem 0.9rem; border-radius: 8px; font-size: 0.85rem; display: none; }
+  .status.ok { background: #dcfce7; color: #166534; display: block; }
+  .status.err { background: #fee2e2; color: #991b1b; display: block; }
+  .status.pending { background: #fef3c7; color: #92400e; display: block; }
+  .footer { text-align: center; margin-top: 1.5rem; color: rgba(255,255,255,0.85); font-size: 0.8rem; }
+</style>
+</head>
+<body>
+  <div class="wrapper">
+    <div class="card">
+      <h1>System PDV PRO</h1>
+      <p class="subtitle">Configuração inicial — escolha o modo desta máquina</p>
+
+      <div class="modes">
+        <div class="mode" data-modo="servidor" id="modoServidor" onclick="window.__selecionarModo && window.__selecionarModo('servidor')">
+          <div class="icon">🖥️</div>
+          <h3>Servidor</h3>
+          <p>Esta máquina hospeda o banco e atende todas as máquinas da rede (caixas e administrativo). Tem acesso a TODOS os módulos (cadastros, relatórios, backup).</p>
+        </div>
+        <div class="mode" data-modo="caixa_adicional" id="modoCaixa" onclick="window.__selecionarModo && window.__selecionarModo('caixa_adicional')">
+          <div class="icon">&#128421;&#65039;</div>
+          <h3>M&#225;quina adicional</h3>
+          <p>Máquina Secundária. Podendo ser caixas e administrativo. Conecta-se a um servidor já instalado na rede.</p>
+        </div>
+      </div>
+
+      <div id="serverFields">
+        <div class="form-row">
+          <label for="serverUrl">Endereço do servidor</label>
+          <input type="text" id="serverUrl" placeholder="http://192.168.0.10:8765" />
+        </div>
+        <div class="form-row">
+          <label for="nomeCaixa">Nome desta máquina (opcional)</label>
+          <input type="text" id="nomeCaixa" placeholder="Caixa 02 — Frente" />
+        </div>
+        <div id="statusConexao" class="status"></div>
+      </div>
+
+      <div id="statusGlobal" class="status" style="display:none;margin-top:12px"></div>
+
+      <div class="actions">
+        <button class="btn-secondary" id="btnTestar" style="display:none">Testar conexão</button>
+        <button class="btn-primary" id="btnConfirmar" disabled>Continuar</button>
+      </div>
+    </div>
+    <div class="footer">© System PDV PRO</div>
+  </div>
+
+<script type="module">
+  const isTauri = !!window.__TAURI_INTERNALS__;
+
+  async function invoke(cmd, args) {
+    if (!isTauri) return mockInvoke(cmd, args);
+    return window.__TAURI_INTERNALS__.invoke(cmd, args);
+  }
+
+  const mockStore = JSON.parse(localStorage.getItem('mockConfig') || '{}');
+  function mockInvoke(cmd, args) {
+    if (cmd === 'get_config') return Promise.resolve(mockStore);
+    if (cmd === 'save_config') {
+      Object.assign(mockStore, args.config);
+      localStorage.setItem('mockConfig', JSON.stringify(mockStore));
+      return Promise.resolve();
+    }
+    if (cmd === 'ensure_identificador') {
+      if (!mockStore.identificador) {
+        mockStore.identificador = crypto.randomUUID();
+        localStorage.setItem('mockConfig', JSON.stringify(mockStore));
+      }
+      return Promise.resolve(mockStore.identificador);
+    }
+    if (cmd === 'hostname') return Promise.resolve('preview-browser');
+    return Promise.resolve(null);
+  }
+
+  let modoEscolhido = null;
+  const modoServidor = document.getElementById('modoServidor');
+  const modoCaixa = document.getElementById('modoCaixa');
+  const serverFields = document.getElementById('serverFields');
+  const btnTestar = document.getElementById('btnTestar');
+  const btnConfirmar = document.getElementById('btnConfirmar');
+  const status = document.getElementById('statusConexao');
+
+  function selecionarModo(m) {
+    modoEscolhido = m;
+    if (modoServidor) modoServidor.classList.toggle('active', m === 'servidor');
+    if (modoCaixa)    modoCaixa.classList.toggle('active', m === 'caixa_adicional');
+    if (serverFields) serverFields.style.display = m === 'caixa_adicional' ? 'block' : 'none';
+    if (btnTestar)    btnTestar.style.display = m === 'caixa_adicional' ? 'inline-block' : 'none';
+    if (btnConfirmar) btnConfirmar.disabled = false;
+  }
+  // Expõe globalmente para os onclick inline dos cards
+  window.__selecionarModo = selecionarModo;
+
+  // Listeners diretos também (redundância proposital)
+  if (modoServidor) modoServidor.addEventListener('click', () => selecionarModo('servidor'));
+  if (modoCaixa)    modoCaixa.addEventListener('click',    () => selecionarModo('caixa_adicional'));
+
+  // ---- Descoberta automática de servidores na rede ----------------------
+
+  if (btnTestar) btnTestar.addEventListener('click', async () => {
+    const url = document.getElementById('serverUrl').value.trim();
+    if (!url) { status.className = 'status err'; status.textContent = 'Digite o endereço do servidor'; return; }
+    status.className = 'status pending';
+    status.textContent = 'Testando conexão...';
+    try {
+      const r = await fetch(url.replace(/\/$/, '') + '/api/identidade');
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json();
+      status.className = 'status ok';
+      status.textContent = `✓ Conectado ao Servidor (v${data.version})`;
+    } catch (e) {
+      status.className = 'status err';
+      status.textContent = '✗ Não foi possível conectar: ' + e.message;
+    }
+  });
+
+  const statusGlobal = document.getElementById('statusGlobal');
+  function showError(msg)    { statusGlobal.className = 'status err';     statusGlobal.style.display = 'block'; statusGlobal.textContent = '⚠ ' + msg; }
+  function showProgress(msg) { statusGlobal.className = 'status pending'; statusGlobal.style.display = 'block'; statusGlobal.textContent = msg; }
+  function clearStatus()     { statusGlobal.style.display = 'none'; }
+
+  if (btnConfirmar) btnConfirmar.addEventListener('click', async () => {
+    btnConfirmar.disabled = true;
+    btnConfirmar.textContent = 'Configurando...';
+    clearStatus();
+    try {
+      showProgress('Gerando identificador da máquina...');
+      const id = await invoke('ensure_identificador');
+      const host = await invoke('hostname');
+
+      const config = {
+        modo: modoEscolhido,
+        identificador: id,
+        nome_caixa: document.getElementById('nomeCaixa').value.trim() || (modoEscolhido === 'servidor' ? 'Servidor' : host),
+        servidor_url: modoEscolhido === 'caixa_adicional'
+          ? document.getElementById('serverUrl').value.trim()
+          : 'http://localhost:8765',
+      };
+
+      showProgress('Salvando configuração...');
+      await invoke('save_config', { config });
+      // Sincroniza Tauri storage → localStorage para que app.html leia corretamente
+      try { localStorage.setItem('mockConfig', JSON.stringify(config)); } catch(_) {}
+
+      if (modoEscolhido === 'servidor' && isTauri) {
+        showProgress('Iniciando servidor de rede embutido...');
+        await invoke('start_embedded_server');
+        let healthy = false;
+        for (let i = 0; i < 60; i++) {
+          await new Promise(r => setTimeout(r, 500));
+          try { const r = await fetch('http://localhost:8765/api/health'); if (r.ok) { healthy = true; break; } } catch {}
+          if (i === 6)  showProgress('Aguardando servidor (carregando banco de dados)...');
+          if (i === 20) showProgress('Servidor está demorando mais que o normal...');
+          if (i === 40) showProgress('Verificando logs do servidor (quase lá)...');
+        }
+        if (!healthy) {
+          let logTail = '';
+          try { logTail = await invoke('read_server_log_tail'); } catch {}
+          throw new Error('O servidor de rede não respondeu em 30 segundos. Verifique se Node.js está instalado e se o better-sqlite3 carregou. ' + (logTail ? '\n\nÚltimas linhas do log:\n' + logTail : ''));
+        }
+      }
+
+      if (modoEscolhido === 'caixa_adicional') {
+        showProgress('Registrando este caixa no servidor...');
+        try {
+          await fetch(config.servidor_url.replace(/\/$/, '') + '/api/caixas-clientes/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ identificador: id, nome: config.nome_caixa, hostname: host, versao_cliente: '2.0.0-alpha.1' }),
+          });
+        } catch (e) { console.warn('Registro falhou (segue mesmo assim):', e); }
+      }
+
+      showProgress('Pronto! Abrindo o sistema...');
+      window.location.href = './app.html';
+    } catch (e) {
+      showError('Falha na configuração: ' + (e && e.message ? e.message : e));
+      btnConfirmar.disabled = false;
+      btnConfirmar.textContent = 'Continuar';
+    }
+  });
+
+  async function aguardarServidor(serverUrl, timeoutMs = 30000) {
+    const inicio = Date.now();
+    while (Date.now() - inicio < timeoutMs) {
+      try {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 1500);
+        const r = await fetch(serverUrl.replace(/\/$/, '') + '/api/health', { signal: ctrl.signal });
+        clearTimeout(t);
+        if (r.ok) return true;
+      } catch (_e) {}
+      await new Promise(r => setTimeout(r, 500));
+    }
+    return false;
+  }
+
+  (async () => {
+    const cfg = await invoke('get_config');
+    if (!cfg || !cfg.modo) return; // primeiro acesso, sem config
+
+    const serverUrl = cfg.servidor_url || 'http://localhost:8765';
+
+    if (cfg.modo === 'servidor' && isTauri) {
+      showProgress('Iniciando servidor de rede embutido...');
+      try { await invoke('start_embedded_server'); } catch (e) {
+        console.warn('[startup] start_embedded_server falhou:', e);
+      }
+    } else {
+      showProgress('Verificando conexão com o servidor...');
+    }
+
+    const timeoutConexao = 5000;
+    const ok = await aguardarServidor(serverUrl, timeoutConexao);
+    // Sempre sincroniza config no localStorage
+    try { localStorage.setItem('mockConfig', JSON.stringify(cfg)); } catch(_) {}
+    if (ok || cfg.modo === 'caixa_adicional' || cfg.modo === 'servidor') {
+      window.location.href = './app.html';
+      return;
+    }
+
+    clearStatus();
+    selecionarModo(cfg.modo);
+    if (cfg.servidor_url) {
+      const inp = document.getElementById('serverUrl');
+      if (inp) inp.value = cfg.servidor_url;
+    }
+    if (cfg.nome_caixa) {
+      const inp = document.getElementById('nomeCaixa');
+      if (inp) inp.value = cfg.nome_caixa;
+    }
+    showError(
+      cfg.modo === 'servidor'
+        ? 'O servidor embutido não respondeu em 30 segundos. Verifique se Node.js está instalado. Você pode tentar reconfigurar e clicar Continuar.'
+        : 'Servidor da rede em ' + serverUrl + ' não respondeu. Verifique se está ligado e clique Continuar.'
+    );
+  })();
+</script>
+</body>
+</html>
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           

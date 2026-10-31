@@ -1,0 +1,10 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+src-tauri/resources/node.exe
+src-tauri/resources/node
+src-tauri/resources/server/
+*.log
+.DS_Store
+src-tauri/icons/source.png
