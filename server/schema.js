@@ -189,6 +189,30 @@ const SCHEMA_SQL = `
 const SENHA_PADRAO_MASTER_HASH = 'Hf3ucht_22';
 const HASH_ADMIN_LEGADO = 'Hi5mpb0_28';
 
+const INDICES_SQL = [
+  'CREATE INDEX IF NOT EXISTS idx_vendas_data ON vendas(data)',
+  'CREATE INDEX IF NOT EXISTS idx_vendas_status_data ON vendas(status, data)',
+  'CREATE INDEX IF NOT EXISTS idx_vendas_caixa ON vendas(caixa_id)',
+  'CREATE INDEX IF NOT EXISTS idx_vendas_cliente ON vendas(cliente_id)',
+  'CREATE INDEX IF NOT EXISTS idx_venda_itens_venda ON venda_itens(venda_id)',
+  'CREATE INDEX IF NOT EXISTS idx_venda_itens_produto ON venda_itens(produto_id)',
+  'CREATE INDEX IF NOT EXISTS idx_produtos_codigo ON produtos(codigo)',
+  'CREATE INDEX IF NOT EXISTS idx_produtos_barras ON produtos(codigo_barras)',
+  'CREATE INDEX IF NOT EXISTS idx_produtos_categoria ON produtos(categoria_id)',
+  'CREATE INDEX IF NOT EXISTS idx_mov_estoque_produto ON movimentacao_estoque(produto_id, data)',
+  'CREATE INDEX IF NOT EXISTS idx_caixa_mov_caixa ON caixa_movimentos(caixa_id)',
+  'CREATE INDEX IF NOT EXISTS idx_contas_pagar_status_venc ON contas_pagar(status, data_vencimento)',
+  'CREATE INDEX IF NOT EXISTS idx_contas_receber_status_venc ON contas_receber(status, data_vencimento)',
+];
+
+// Falha de um indice (ex.: coluna ainda inexistente em backup antigo) nunca
+// impede a inicializacao; a v4 recria os indices depois de ajustar as colunas.
+function criarIndices(db, log) {
+  for (const sql of INDICES_SQL) {
+    try { db.exec(sql); } catch (e) { log('indice ignorado:', e.message); }
+  }
+}
+
 // ----------------------------- Migrations -----------------------------
 // Controladas por PRAGMA user_version. Cada migration roda uma unica vez
 // por banco (e e idempotente, para bancos antigos que partem de versao 0).
@@ -204,24 +228,7 @@ const MIGRATIONS = [
   // conforme o historico de vendas cresce). Falha de um indice nunca
   // impede a inicializacao.
   function v2_indices(db, log) {
-    const indices = [
-      'CREATE INDEX IF NOT EXISTS idx_vendas_data ON vendas(data)',
-      'CREATE INDEX IF NOT EXISTS idx_vendas_status_data ON vendas(status, data)',
-      'CREATE INDEX IF NOT EXISTS idx_vendas_caixa ON vendas(caixa_id)',
-      'CREATE INDEX IF NOT EXISTS idx_vendas_cliente ON vendas(cliente_id)',
-      'CREATE INDEX IF NOT EXISTS idx_venda_itens_venda ON venda_itens(venda_id)',
-      'CREATE INDEX IF NOT EXISTS idx_venda_itens_produto ON venda_itens(produto_id)',
-      'CREATE INDEX IF NOT EXISTS idx_produtos_codigo ON produtos(codigo)',
-      'CREATE INDEX IF NOT EXISTS idx_produtos_barras ON produtos(codigo_barras)',
-      'CREATE INDEX IF NOT EXISTS idx_produtos_categoria ON produtos(categoria_id)',
-      'CREATE INDEX IF NOT EXISTS idx_mov_estoque_produto ON movimentacao_estoque(produto_id, data)',
-      'CREATE INDEX IF NOT EXISTS idx_caixa_mov_caixa ON caixa_movimentos(caixa_id)',
-      'CREATE INDEX IF NOT EXISTS idx_contas_pagar_status_venc ON contas_pagar(status, data_vencimento)',
-      'CREATE INDEX IF NOT EXISTS idx_contas_receber_status_venc ON contas_receber(status, data_vencimento)',
-    ];
-    for (const sql of indices) {
-      try { db.exec(sql); } catch (e) { log('migracao v2: indice ignorado:', e.message); }
-    }
+    criarIndices(db, log);
   },
 
   // v3 — seguranca: neutraliza a credencial `admin` publicada no repositorio.
@@ -241,6 +248,63 @@ const MIGRATIONS = [
         UPDATE usuarios SET ativo = 0 WHERE id = NEW.id;
       END;
     `);
+  },
+
+  // v4 — colunas e correcoes de dados que ANTES eram feitas pelo front-end
+  // (criarEstrutura no app.html). Agora o servidor e a unica fonte de verdade
+  // do schema: assim funciona tambem ao restaurar backups de versoes antigas,
+  // e o modo `strict` (token obrigatorio) nao depende de chamadas pre-login.
+  function v4_colunas_e_backfills(db, log) {
+    const colunas = [
+      ['caixa', 'turno', 'INTEGER DEFAULT 1'],
+      ['caixa', 'total_sangrias', 'REAL DEFAULT 0'],
+      ['caixa', 'total_suprimentos', 'REAL DEFAULT 0'],
+      ['caixa', 'caixa_identificador', 'TEXT'],
+      ['vendas', 'caixa_id', 'INTEGER'],
+      ['usuarios', 'perfil_id', 'INTEGER'],
+      ['produtos', 'permite_estoque_negativo', 'INTEGER DEFAULT 1'],
+      ['produtos', 'foto', 'TEXT'],
+      ['nota_entrada_itens', 'ncm', 'TEXT'],
+      ['nota_entrada_itens', 'cfop', 'TEXT'],
+      ['nota_entrada_itens', 'unidade', 'TEXT'],
+      ['notas_entrada', 'xml_content', 'TEXT'],
+      ['contas_pagar', 'fornecedor_nome', 'TEXT'],
+    ];
+    for (const [tabela, coluna, def] of colunas) {
+      try {
+        const existentes = db.prepare('PRAGMA table_info(' + tabela + ')').all().map((c) => c.name);
+        if (existentes.length && !existentes.includes(coluna)) {
+          db.exec('ALTER TABLE ' + tabela + ' ADD COLUMN ' + coluna + ' ' + def);
+          log('migracao v4: coluna adicionada ' + tabela + '.' + coluna);
+        }
+      } catch (e) { log('migracao v4: coluna ignorada ' + tabela + '.' + coluna + ':', e.message); }
+    }
+    const backfills = [
+      `UPDATE contas_pagar
+         SET fornecedor_id = (SELECT fornecedor_id FROM notas_entrada WHERE notas_entrada.id = contas_pagar.nota_id)
+       WHERE fornecedor_id IS NULL AND nota_id IS NOT NULL
+         AND (SELECT fornecedor_id FROM notas_entrada WHERE notas_entrada.id = contas_pagar.nota_id) IS NOT NULL`,
+      `UPDATE notas_entrada
+         SET fornecedor_id = (SELECT id FROM fornecedores WHERE fornecedores.cnpj = notas_entrada.cnpj_fornecedor LIMIT 1)
+       WHERE fornecedor_id IS NULL AND cnpj_fornecedor IS NOT NULL AND cnpj_fornecedor <> ''
+         AND (SELECT id FROM fornecedores WHERE fornecedores.cnpj = notas_entrada.cnpj_fornecedor LIMIT 1) IS NOT NULL`,
+      `UPDATE contas_pagar
+         SET fornecedor_id = (SELECT fornecedor_id FROM notas_entrada WHERE notas_entrada.id = contas_pagar.nota_id)
+       WHERE fornecedor_id IS NULL AND nota_id IS NOT NULL
+         AND (SELECT fornecedor_id FROM notas_entrada WHERE notas_entrada.id = contas_pagar.nota_id) IS NOT NULL`,
+      `UPDATE contas_pagar
+         SET fornecedor_nome = (
+           SELECT COALESCE(f.nome, n.fornecedor_nome)
+           FROM contas_pagar c2
+           LEFT JOIN fornecedores f ON c2.fornecedor_id = f.id
+           LEFT JOIN notas_entrada n ON c2.nota_id = n.id
+           WHERE c2.id = contas_pagar.id)
+       WHERE (fornecedor_nome IS NULL OR fornecedor_nome = '')`,
+    ];
+    for (const sql of backfills) {
+      try { db.exec(sql); } catch (e) { log('migracao v4: backfill ignorado:', e.message); }
+    }
+    criarIndices(db, log);
   },
 ];
 
@@ -296,8 +360,28 @@ function inicializarSchema(db, log) {
   aplicarSeeds(db);
 }
 
+// Tabelas apagadas por "Zerar sistema" (mesma lista usada antes pelo front).
+const TABELAS_ZERAR = [
+  'venda_itens', 'vendas', 'movimentacao_estoque', 'caixa_movimentos', 'caixa',
+  'nota_entrada_itens', 'notas_entrada', 'contas_pagar', 'contas_receber',
+  'produtos', 'categorias', 'clientes', 'fornecedores',
+  'usuarios', 'perfis', 'empresa', 'configuracoes',
+];
+
+// Apaga todos os dados e recria os seeds (master, perfis, empresa), tudo numa
+// unica transacao — se algo falhar, nada e apagado.
+function zerarDados(db) {
+  const executar = db.transaction(() => {
+    for (const t of TABELAS_ZERAR) db.exec('DELETE FROM ' + t);
+    try { db.exec("DELETE FROM sqlite_sequence WHERE name IN ('" + TABELAS_ZERAR.join("','") + "')"); } catch (_) {}
+    aplicarSeeds(db);
+  });
+  executar();
+}
+
 module.exports = {
   inicializarSchema,
+  zerarDados,
   hashSenha,
   PERMISSOES_TODAS,
   SENHA_PADRAO_MASTER_HASH,

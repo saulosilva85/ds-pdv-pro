@@ -53,14 +53,67 @@ jobs:
           Write-Host "Baixando $nodeUrl"
           Invoke-WebRequest -Uri $nodeUrl -OutFile "$res/node.exe"
 
-          # 2) Servidor + dependencias.
-          Copy-Item server/server.js   "$res/server/server.js"   -Force
-          Copy-Item server/schema.js   "$res/server/schema.js"   -Force
+          # 2) Servidor + dependencias. Copia TODOS os .js da raiz de server/
+          #    (server.js, schema.js, security.js, backup.js ...), para que
+          #    modulos novos nunca fiquem de fora do instalador. (tests/ nao
+          #    entra: so existe como subpasta.)
+          Copy-Item server/*.js "$res/server/" -Force
           Copy-Item server/package.json "$res/server/package.json" -Force
           Copy-Item server/node_modules "$res/server/node_modules" -Recurse -Force
 
+          # Falha cedo se algum modulo essencial nao foi empacotado.
+          foreach ($f in @("server.js", "schema.js", "security.js", "backup.js")) {
+            if (-not (Test-Path "$res/server/$f")) { throw "Arquivo do servidor ausente no pacote: $f" }
+          }
+
           Write-Host "Conteudo de $res"
           Get-ChildItem $res -Recurse -Depth 1 | Select-Object FullName
+
+      - name: Teste de fumaca do servidor embutido (node.exe + better-sqlite3)
+        # Roda o servidor EMPACOTADO (mesmo node.exe e node_modules do instalador)
+        # e confere login, token e bloqueio sem token. Comeca como aviso
+        # (continue-on-error); depois de uma execucao verde, troque para false.
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $dados = Join-Path $env:RUNNER_TEMP "pdv-smoke"
+          New-Item -ItemType Directory -Force -Path $dados | Out-Null
+          $env:PDV_DATA_DIR = $dados
+          $env:PDV_PORT = "8765"
+          $node = (Resolve-Path "src-tauri/resources/node.exe").Path
+          $dir  = (Resolve-Path "src-tauri/resources/server").Path
+          $out  = Join-Path $env:RUNNER_TEMP "srv.out.log"
+          $err  = Join-Path $env:RUNNER_TEMP "srv.err.log"
+          $p = Start-Process -FilePath $node -ArgumentList "server.js" -WorkingDirectory $dir -PassThru -NoNewWindow -RedirectStandardOutput $out -RedirectStandardError $err
+          $ok = $false
+          for ($i = 0; $i -lt 30; $i++) {
+            Start-Sleep -Seconds 1
+            try {
+              $h = Invoke-RestMethod -Uri "http://127.0.0.1:8765/api/health"
+              if ($h.status -eq "ok") { $ok = $true; break }
+            } catch {}
+          }
+          try {
+            if (-not $ok) { throw "Servidor nao respondeu em 30s" }
+            $login = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8765/api/auth/login" -ContentType "application/json" -Body '{"login":"master","senha":"master"}'
+            if (-not $login.token) { throw "Login nao devolveu token" }
+            if ($login.usuario.PSObject.Properties.Name -contains "senha") { throw "Login devolveu a senha do usuario" }
+            $recusou = $false
+            try {
+              Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8765/api/sql/exec" -ContentType "application/json" -Body '{"sql":"SELECT 1","params":[]}' | Out-Null
+            } catch { $recusou = $true }
+            if (-not $recusou) { throw "/api/sql/exec aceitou requisicao sem token" }
+            $hdr = @{ Authorization = "Bearer $($login.token)" }
+            $r = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8765/api/sql/exec" -Headers $hdr -ContentType "application/json" -Body '{"sql":"SELECT COUNT(*) AS c FROM usuarios","params":[]}'
+            if ($r.rows[0].c -lt 1) { throw "Consulta autenticada falhou" }
+            Write-Host "Teste de fumaca OK"
+          } finally {
+            Write-Host "---- stdout do servidor"
+            Get-Content $out -ErrorAction SilentlyContinue
+            Write-Host "---- stderr do servidor"
+            Get-Content $err -ErrorAction SilentlyContinue
+            if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+          }
 
       - name: Build Tauri (NSIS installer)
         run: npm run build

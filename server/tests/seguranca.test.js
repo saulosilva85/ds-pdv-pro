@@ -3,7 +3,7 @@ const assert = require('node:assert');
 const fs = require('fs'), os = require('os'), path = require('path');
 const Database = require('./adapter');
 const S = '../';
-const { inicializarSchema, hashSenha, HASH_ADMIN_LEGADO, SENHA_PADRAO_MASTER_HASH, SCHEMA_VERSION } = require(S + 'schema');
+const { inicializarSchema, hashSenha, zerarDados, HASH_ADMIN_LEGADO, SENHA_PADRAO_MASTER_HASH, SCHEMA_VERSION } = require(S + 'schema');
 const sec = require(S + 'security');
 const bkp = require(S + 'backup');
 
@@ -167,4 +167,43 @@ test('restore: valida banco bom, recusa lixo e banco de outro sistema', () => {
   const outro = path.join(dir, 'outro.db'); const d2 = new Database(outro); d2.exec('CREATE TABLE t(x)'); d2.close();
   const r = bkp.validarArquivoBanco(Database, outro);
   assert.ok(!r.ok && /faltam/.test(r.erro));
+});
+
+test('migration v4: restaurar backup antigo SEM as colunas novas -> colunas recriadas, dados mantidos', () => {
+  const db = new Database(path.join(tmp(), 'g.db'));
+  inicializarSchema(db, log);
+  db.prepare("INSERT INTO produtos (nome,preco_venda) VALUES ('Feijao',8)").run();
+  db.exec('DROP INDEX IF EXISTS idx_vendas_caixa'); // indice precisa sair antes da coluna
+  db.exec('ALTER TABLE produtos DROP COLUMN foto; ALTER TABLE caixa DROP COLUMN total_sangrias; ALTER TABLE vendas DROP COLUMN caixa_id;');
+  db.exec('PRAGMA user_version = 3');
+  inicializarSchema(db, log);
+  const cols = (t) => db.prepare('PRAGMA table_info(' + t + ')').all().map(c => c.name);
+  assert.ok(cols('produtos').includes('foto'));
+  assert.ok(cols('caixa').includes('total_sangrias'));
+  assert.ok(cols('vendas').includes('caixa_id'));
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM produtos').get().c, 1);
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM sqlite_master WHERE name='idx_vendas_caixa'").get().c, 1); // indice recriado
+});
+
+test('zerarDados: apaga tudo, recria master/perfis/empresa e nao revive o admin legado', () => {
+  const db = new Database(path.join(tmp(), 'h.db'));
+  inicializarSchema(db, log);
+  db.prepare("INSERT INTO produtos (nome,preco_venda) VALUES ('X',1)").run();
+  db.prepare("INSERT INTO usuarios (nome,login,senha,nivel,ativo) VALUES ('Ana','ana','H1_1','caixa',1)").run();
+  db.prepare("INSERT INTO configuracoes (chave,valor) VALUES ('a','b')").run();
+  zerarDados(db);
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM produtos').get().c, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM configuracoes').get().c, 0);
+  assert.deepEqual(db.prepare('SELECT login FROM usuarios').all().map(u => u.login), ['master']);
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM perfis').get().c, 3);
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM empresa').get().c, 1);
+});
+
+test('zerarDados: se falhar no meio, nada e apagado (transacao)', () => {
+  const db = new Database(path.join(tmp(), 'i.db'));
+  inicializarSchema(db, log);
+  db.prepare("INSERT INTO produtos (nome,preco_venda) VALUES ('Y',1)").run();
+  db.exec('DROP TABLE configuracoes'); // forca erro no DELETE da ultima tabela
+  assert.throws(() => zerarDados(db));
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM produtos').get().c, 1);
 });

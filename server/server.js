@@ -12,10 +12,10 @@
 // Seguranca (v2.1):
 //   - Autenticacao por token assinado (HMAC) com expiracao.
 //   - Modo de autenticacao (PDV_AUTH_MODE):
-//       "soft"   (padrao) aceita requisicoes sem token, mas registra
-//                quantas chegaram sem token. Compativel com o front atual.
-//       "strict" exige token valido em /api/sql/* e /api/backup/*.
-//     Troque para "strict" depois que o front-end enviar o token.
+//       "strict" (padrao) exige token valido em /api/sql/*, /api/backup/*
+//                e /api/admin/*.
+//       "soft"   aceita requisicoes sem token (so registra no log). Use
+//                apenas como escape de emergencia com um front-end antigo.
 //   - Bloqueio de SQL perigoso (ATTACH, PRAGMA de escrita, extensoes...).
 //   - CORS restrito a origens locais/da rede; validacao do cabecalho Host.
 //   - Limitador de tentativas de login.
@@ -32,12 +32,13 @@ const cors = require('cors');
 const Database = require('better-sqlite3');
 const { WebSocketServer } = require('ws');
 const {
-  inicializarSchema, hashSenha, SENHA_PADRAO_MASTER_HASH, SCHEMA_VERSION,
+  inicializarSchema, hashSenha, zerarDados, PERMISSOES_TODAS,
+  SENHA_PADRAO_MASTER_HASH, SCHEMA_VERSION,
 } = require('./schema');
 const sec = require('./security');
 const bkp = require('./backup');
 
-const VERSION = '2.1.0';
+const VERSION = '2.2.0';
 const PORT = parseInt(process.env.PDV_PORT || '8765', 10);
 const HOST = process.env.PDV_HOST || '0.0.0.0';
 
@@ -52,7 +53,7 @@ const DB_PATH = process.env.PDV_DB_PATH || path.join(DATA_DIR, 'system_pdv_pro.d
 const STATIC_DIR = process.env.PDV_STATIC_DIR || path.join(__dirname, '..');
 
 // Seguranca
-const AUTH_MODE = (process.env.PDV_AUTH_MODE || 'soft').toLowerCase() === 'strict' ? 'strict' : 'soft';
+const AUTH_MODE = (process.env.PDV_AUTH_MODE || 'strict').toLowerCase() === 'soft' ? 'soft' : 'strict';
 const EXTRA_HOSTS = (process.env.PDV_ALLOWED_HOSTS || '')
   .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
 
@@ -136,6 +137,8 @@ function carregarUsuarioAuth(id) {
       try { permissoes = JSON.parse(p.permissoes); } catch (_) { permissoes = []; }
     }
   }
+  // Mesmo criterio do front-end: nivel `admin` (perfil ADMINISTRADOR) tem acesso total.
+  if (u.nivel === 'admin') permissoes = PERMISSOES_TODAS.slice();
   return { id: u.id, login: u.login, nivel: u.nivel, permissoes };
 }
 
@@ -230,7 +233,9 @@ app.post('/api/auth/login', (req, res) => {
   }
 });
 
-app.post('/api/logout', (req, res) => res.json({ ok: true }));
+// O front-end chama /api/auth/logout; /api/logout e mantido por compatibilidade.
+// Os tokens sao sem estado (expiram sozinhos), entao nao ha o que revogar.
+app.post(['/api/auth/logout', '/api/logout'], (req, res) => res.json({ ok: true }));
 
 // SQL do front-end — protegido por token (modo strict), com bloqueios.
 function validarSql(req, sql) {
@@ -287,6 +292,33 @@ app.post('/api/sql/exec-batch', autenticar, (req, res) => {
   } catch (e) {
     log('exec-batch erro:', e.message);
     res.status(500).json({ error: e.message });
+  }
+});
+
+// "Zerar sistema": apaga TODOS os dados e recria os seeds, numa transacao.
+// Exige token (mesmo em modo soft), usuario master e reconfirmacao da senha.
+app.post('/api/admin/zerar', autenticar, (req, res) => {
+  const u = req.usuarioAuth;
+  if (!u) return res.status(401).json({ error: 'Faca login para executar esta acao.' });
+  if (u.nivel !== 'master') return res.status(403).json({ error: 'Somente o usuario master pode zerar o sistema.' });
+  const chaveLimite = 'zerar:' + u.login;
+  const espera = limitadorLogin.bloqueadoPorSegundos(ipDe(req), chaveLimite);
+  if (espera > 0) return res.status(429).json({ error: 'Muitas tentativas. Aguarde alguns minutos.' });
+  const { senha } = req.body || {};
+  const linha = db.prepare('SELECT senha FROM usuarios WHERE id=?').get(u.id);
+  if (!linha || !sec.senhaConfere(linha.senha, senha, hashSenha)) {
+    limitadorLogin.registrarFalha(ipDe(req), chaveLimite);
+    return res.status(403).json({ error: 'Senha incorreta.' });
+  }
+  limitadorLogin.registrarSucesso(ipDe(req), chaveLimite);
+  try {
+    zerarDados(db);
+    log('Sistema ZERADO por', u.login, 'a partir de', ipDe(req));
+    broadcast({ type: 'restore' });
+    res.json({ ok: true });
+  } catch (e) {
+    log('zerar erro:', e.message);
+    res.status(500).json({ error: 'Falha ao zerar: ' + e.message });
   }
 });
 

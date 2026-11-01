@@ -1206,10 +1206,12 @@ table tr:hover td { background: #f8fafc; }
                   <option value="">-- Selecione --</option>
                 </select>
                 <button type="button" class="btn btn-sm btn-primary" onclick="_carregarImpressorasReais()" title="Atualizar impressoras instaladas no Windows">↻</button>
+                <button type="button" class="btn btn-sm btn-info" onclick="testarImpressora()" title="Imprimir um cupom de teste">🖨 Testar</button>
               </div>
               <small style="color:#64748b">
                 A lista é atualizada diretamente pelas impressoras instaladas no Windows.
                 Clique em ↻ após instalar ou desinstalar uma impressora.
+                <b>A impressora, o papel e a gaveta são salvos apenas NESTA máquina</b> — cada caixa usa a sua.
               </small>
             </div>
             <div>
@@ -1448,6 +1450,22 @@ function _bearerHeader() {
   try { return sessionStorage.getItem('pdvpro_token') || ''; }
   catch { return ''; }
 }
+// Aplica o Bearer token (se houver) a qualquer XHR feito ao servidor.
+function _aplicarBearer(xhr) {
+  const tk = _bearerHeader();
+  if (tk) { try { xhr.setRequestHeader('Authorization', 'Bearer ' + tk); } catch(_) {} }
+}
+// Servidor (modo strict) recusou uma requisicao que TINHA token: a sessao
+// expirou (12 h) ou o usuario foi removido. Volta para a tela de login.
+let _sessaoExpiradaAvisada = false;
+function _tratar401(tinhaToken) {
+  if (!tinhaToken || _sessaoExpiradaAvisada) return;
+  _sessaoExpiradaAvisada = true;
+  try { sessionStorage.removeItem('pdvpro_token'); } catch(_) {}
+  try { sessionStorage.removeItem('pdvpro_sessao_ativa'); } catch(_) {}
+  try { toast('Sua sessão expirou. Faça login novamente.', 'warning'); } catch(_) {}
+  setTimeout(function() { location.reload(); }, 1200);
+}
 function _sqlExecSync(sql, params) {
   const xhr = new XMLHttpRequest();
   xhr.open('POST', NETWORK_BASE_URL + '/api/sql/exec', false);
@@ -1460,6 +1478,7 @@ function _sqlExecSync(sql, params) {
     throw new Error('Sem conexão com o servidor (' + NETWORK_BASE_URL + '): ' + e.message);
   }
   if (xhr.status !== 200) {
+    if (xhr.status === 401) _tratar401(!!tk);
     let body;
     try { body = JSON.parse(xhr.responseText); } catch(_) { body = { error: xhr.responseText }; }
     throw new Error(body.error || ('HTTP ' + xhr.status));
@@ -1477,6 +1496,7 @@ function _sqlExecBatchSync(statements) {
   if (tk) xhr.setRequestHeader('Authorization', 'Bearer ' + tk);
   xhr.send(JSON.stringify({ statements: statements }));
   if (xhr.status !== 200) {
+    if (xhr.status === 401) _tratar401(!!tk);
     let body;
     try { body = JSON.parse(xhr.responseText); } catch(_) { body = { error: xhr.responseText }; }
     throw new Error(body.error || ('HTTP ' + xhr.status));
@@ -1491,6 +1511,7 @@ function _sqlNotify(entidade, ids) {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', NETWORK_BASE_URL + '/api/sql/notify', true); // async fire-and-forget
     xhr.setRequestHeader('Content-Type', 'application/json');
+    _aplicarBearer(xhr);
     xhr.send(JSON.stringify({ entidade: entidade, ids: ids }));
   } catch(e) { /* best effort */ }
 }
@@ -1593,6 +1614,7 @@ const _remoteDb = {
   export() {
     const xhr = new XMLHttpRequest();
     xhr.open('GET', NETWORK_BASE_URL + '/api/backup/dump', false); // síncrono
+    _aplicarBearer(xhr);
     xhr.overrideMimeType('text/plain; charset=x-user-defined');
     xhr.send(null);
     if (xhr.status !== 200) throw new Error('Falha no dump do backup: HTTP ' + xhr.status);
@@ -1681,8 +1703,8 @@ const PERMISSOES_CAIXA = [
 // Verifica se o usuário logado possui determinada permissão
 function temPermissao(idPermissao) {
   if (!usuarioLogado) return false;
-  // master (e usuário oculto admin) têm acesso irrestrito
-  if (usuarioLogado.nivel === 'master' || usuarioLogado.login === 'admin' || usuarioLogado.login === 'master') return true;
+  // master tem acesso irrestrito (o antigo usuario oculto `admin` foi removido)
+  if (usuarioLogado.nivel === 'master' || usuarioLogado.login === 'master') return true;
   if (!usuarioLogado._permissoes) return false;
   return usuarioLogado._permissoes.includes(idPermissao);
 }
@@ -1690,8 +1712,8 @@ function temPermissao(idPermissao) {
 // Carrega as permissões do usuário logado com base no seu perfil
 function carregarPermissoesUsuario() {
   if (!usuarioLogado) return;
-  // master e admin têm acesso total (hard-coded em temPermissao)
-  if (usuarioLogado.login === 'master' || usuarioLogado.login === 'admin' || usuarioLogado.nivel === 'master') {
+  // master tem acesso total (hard-coded em temPermissao)
+  if (usuarioLogado.login === 'master' || usuarioLogado.nivel === 'master') {
     usuarioLogado._permissoes = PERMISSOES_TODAS.slice();
     return;
   }
@@ -1797,7 +1819,9 @@ async function inicializarBanco() {
   //    no boot; aqui rodamos criarEstrutura() apenas para garantir
   //    seeds (perfis ADMINISTRADOR/GERENTE/CAIXA, usuário master, etc.)
   //    e migrations idempotentes (ALTER TABLE ADD COLUMN IF NOT EXISTS).
-  try { criarEstrutura(); } catch(e) { console.warn('[inicializarBanco] criarEstrutura falhou (ignorado):', e); }
+  // v2.2: o SERVIDOR e a unica fonte de verdade do schema, das migrations e dos
+  // seeds (schema.js). Chamar criarEstrutura() aqui, antes do login, nao
+  // funciona com o servidor exigindo token e nao e mais necessario.
   // 3) Conecta ao WebSocket para receber notificações em tempo real
   //    de outros caixas (mudança de produto, venda finalizada, etc.).
   _conectarWebSocket();
@@ -2148,14 +2172,7 @@ function criarEstrutura() {
       ['Administrador Master', 'master', hashSenha('master'), 'master']
     );
   }
-  // Criar usuário admin do desenvolvedor (oculto para clientes finais)
-  const ra = db.exec("SELECT COUNT(*) as c FROM usuarios WHERE login='admin'");
-  if (!ra.length || ra[0].values[0][0] === 0) {
-    db.run(
-      "INSERT INTO usuarios (nome, login, senha, nivel, ativo) VALUES (?, ?, ?, ?, 1)",
-      ['Administrador do Sistema', 'admin', hashSenha('Silv@193085!'), 'master']
-    );
-  }
+  // (Removido: o antigo usuario `admin` embutido. Nao recriar credenciais no codigo.)
   // Registro empresa
   const re = db.exec("SELECT COUNT(*) as c FROM empresa");
   if (!re.length || re[0].values[0][0] === 0) {
@@ -2323,6 +2340,9 @@ function _fazerLoginCore(e) {
   // v2.4: envia hash para /api/auth/login (compativel com servidor instalado)
   const hash = hashSenha(senha);
   let usuarioAutenticado = null;
+  let apiRespondeu = false;   // o servidor respondeu explicitamente (senha errada / bloqueio)
+  let msgErroLogin = '';
+  let senhaPadrao = false;
   try {
     const xhrAuth = new XMLHttpRequest();
     xhrAuth.open('POST', NETWORK_BASE_URL + '/api/auth/login', false);
@@ -2332,13 +2352,19 @@ function _fazerLoginCore(e) {
       const body = JSON.parse(xhrAuth.responseText);
       if (body && body.usuario) {
         usuarioAutenticado = body.usuario;
+        senhaPadrao = !!body.senha_padrao;
         if (body.token) sessionStorage.setItem('pdvpro_token', body.token);
       }
+    } else if (xhrAuth.status === 401 || xhrAuth.status === 403 || xhrAuth.status === 429) {
+      apiRespondeu = true;
+      try { msgErroLogin = (JSON.parse(xhrAuth.responseText) || {}).error || ''; } catch(_) {}
     }
   } catch(_) {}
 
-  // Fallback: SQL direto se API nao respondeu
-  if (!usuarioAutenticado) {
+  // Fallback por SQL SOMENTE se o endpoint de login nao respondeu (servidor
+  // antigo). Se o servidor respondeu "senha errada" ou "muitas tentativas",
+  // NAO tenta por SQL — isso contornaria o bloqueio de tentativas.
+  if (!usuarioAutenticado && !apiRespondeu) {
     try {
       const res = query("SELECT * FROM usuarios WHERE login=? AND senha=? AND ativo=1", [login, hash]);
       if (res.length > 0) usuarioAutenticado = res[0];
@@ -2346,9 +2372,10 @@ function _fazerLoginCore(e) {
   }
 
   if (!usuarioAutenticado) {
-    toast('Usuario ou senha invalidos', 'error');
+    toast(msgErroLogin || 'Usuario ou senha invalidos', 'error');
     return false;
   }
+  _senhaPadraoPendente = senhaPadrao;
 
   usuarioLogado = usuarioAutenticado;
 
@@ -2380,7 +2407,42 @@ function _fazerLoginCore(e) {
     try { _iniciarBackupAgendado(); } catch(err) { console.warn('_iniciarBackupAgendado falhou:', err); }
   })();
   toast('Bem-vindo(a), ' + usuarioLogado.nome + '!');
+  if (_senhaPadraoPendente) setTimeout(_exigirTrocaSenhaPadrao, 600);
   return false;
+}
+
+// O usuario master ainda usa a senha de fabrica: pede a troca logo apos o login.
+// (O servidor informa isso em `senha_padrao`; se fechar o aviso, ele volta no proximo login.)
+let _senhaPadraoPendente = false;
+function _exigirTrocaSenhaPadrao() {
+  if (!usuarioLogado || usuarioLogado.login !== 'master') return;
+  abrirModal({
+    titulo: '🔐 Troque a senha padrão',
+    conteudo: `
+      <div style="padding:10px;background:#fef3c7;border-left:4px solid #ca8a04;border-radius:4px;margin-bottom:15px;font-size:13px;color:#92400e">
+        Este sistema ainda usa a <b>senha padrão</b> do usuário master. Defina uma nova senha agora para proteger seus dados.
+      </div>
+      <div class="form-group"><label>Nova senha * (mínimo 6 caracteres)</label>
+        <input type="password" id="tpNova" autocomplete="new-password"></div>
+      <div class="form-group"><label>Confirmar nova senha *</label>
+        <input type="password" id="tpConf" autocomplete="new-password"></div>
+    `,
+    tamanho: 'small',
+    textoConfirm: 'Salvar nova senha',
+    onConfirm: () => {
+      const nova = document.getElementById('tpNova').value;
+      const conf = document.getElementById('tpConf').value;
+      if (nova.length < 6) { toast('Use ao menos 6 caracteres', 'error'); return; }
+      if (nova !== conf) { toast('A confirmação não confere', 'error'); return; }
+      if (nova.toLowerCase() === 'master') { toast('Escolha uma senha diferente da padrão', 'error'); return; }
+      try {
+        execute("UPDATE usuarios SET senha=? WHERE id=?", [hashSenha(nova), usuarioLogado.id]);
+        _senhaPadraoPendente = false;
+        fecharModal();
+        toast('Senha alterada com sucesso');
+      } catch (e) { toast('Erro ao salvar a senha: ' + e.message, 'error'); }
+    }
+  });
 }
 
 // Esconde itens do menu conforme permissões do usuário
@@ -4991,7 +5053,7 @@ function carregarCaixa() {
 function abrirCaixa() {
   if (!temPermissao('caixa_abrir')) { toast('Sem permissão para abrir caixa', 'error'); return; }
   const aberto = query("SELECT * FROM caixa WHERE status='aberto' AND caixa_identificador=?", [NETWORK_IDENTIFICADOR]);
-  if (aberto.length) { toast('J� existe um caixa aberto nesta m�quina', 'warning'); return; }
+  if (aberto.length) { toast('Já existe um caixa aberto nesta máquina', 'warning'); return; }
   // Opções de turno (1 a 10)
   let optsTurno = '';
   for (let i = 1; i <= 10; i++) optsTurno += `<option value="${i}">Turno ${i}</option>`;
@@ -5329,6 +5391,7 @@ function abrirModalUsuario(id) {
       const senha = document.getElementById('usSenha').value;
       const ativo = document.getElementById('usAtivo').checked ? 1 : 0;
       if (!nome || !login) { toast('Nome e login são obrigatórios', 'error'); return; }
+      if (login.toLowerCase() === 'admin') { toast('O login "admin" é reservado pelo sistema', 'error'); return; }
       if (!perfilId) { toast('Selecione um perfil', 'error'); return; }
       if (!id && !senha) { toast('Senha é obrigatória', 'error'); return; }
       // Determina nivel (compatibilidade) pelo nome do perfil
@@ -7389,11 +7452,51 @@ function salvarConfigVenda() {
 }
 
 // =============== CONFIGURAÇÕES DE IMPRESSORA ===============
+// Configuracoes que pertencem a ESTE caixa (hardware): impressora, largura do
+// papel e gaveta. NAO podem ficar na tabela `configuracoes`, porque ela e
+// compartilhada por todos os caixas da rede (cada caixa tem a sua impressora).
+// Ficam no localStorage desta maquina, com copia em terminal.json (Tauri) para
+// sobreviver a limpeza do cache do WebView e a atualizacoes do aplicativo.
+const _CFG_LOCAIS = ['cfg_printer_name', 'cfg_paper_width', 'cfg_abre_gaveta'];
+function _cfgLocalLer(chave) {
+  try { const v = localStorage.getItem('pdvpro_terminal_' + chave); return v === null ? undefined : v; }
+  catch(_) { return undefined; }
+}
+function _cfgLocalGravar(chave, valor) {
+  try { localStorage.setItem('pdvpro_terminal_' + chave, String(valor)); } catch(_) {}
+  if (_pdvIsTauri()) {
+    const parcial = {}; parcial[chave] = String(valor);
+    _pdvInvoke('save_terminal_settings', { settings: parcial }).catch(function (e) {
+      console.warn('save_terminal_settings:', e);
+    });
+  }
+}
+// Recupera do arquivo local do Tauri o que o cache do WebView perdeu.
+(function _hidratarConfigTerminal() {
+  if (!_pdvIsTauri()) return;
+  _pdvInvoke('get_terminal_settings').then(function (st) {
+    if (!st) return;
+    _CFG_LOCAIS.forEach(function (k) {
+      if (st[k] !== undefined && _cfgLocalLer(k) === undefined) {
+        try { localStorage.setItem('pdvpro_terminal_' + k, String(st[k])); } catch(_) {}
+      }
+    });
+  }).catch(function () {});
+})();
+
 function getConfig(chave, padrao) {
+  if (_CFG_LOCAIS.indexOf(chave) >= 0) {
+    const local = _cfgLocalLer(chave);
+    if (local !== undefined) return local;
+    // Primeira vez neste caixa. O nome da impressora NAO e herdado do banco
+    // compartilhado em caixas adicionais (seria a impressora de outra maquina).
+    if (chave === 'cfg_printer_name' && NETWORK_MODE !== 'servidor') return padrao;
+  }
   const r = query("SELECT valor FROM configuracoes WHERE chave=?", [chave]);
   return r.length ? r[0].valor : padrao;
 }
 function setConfig(chave, valor) {
+  if (_CFG_LOCAIS.indexOf(chave) >= 0) { _cfgLocalGravar(chave, valor); return; }
   const r = query("SELECT chave FROM configuracoes WHERE chave=?", [chave]);
   if (r.length) execute("UPDATE configuracoes SET valor=? WHERE chave=?", [valor, chave]);
   else execute("INSERT INTO configuracoes (chave,valor) VALUES (?,?)", [chave, valor]);
@@ -7491,6 +7594,20 @@ function removerImpressoraSalva() {
   preencherDropdownImpressoras();
 }
 
+// Imprime um cupom de teste na impressora selecionada (aplicativo instalado).
+function testarImpressora() {
+  const sel = document.getElementById('cfgPrinterName');
+  const nome = sel ? sel.value.trim() : '';
+  if (!nome) { toast('Selecione uma impressora primeiro', 'warning'); return; }
+  if (!_pdvIsTauri()) {
+    toast('O teste de impressão direta só funciona no aplicativo instalado', 'warning');
+    return;
+  }
+  _pdvInvoke('print_test', { printer: nome })
+    .then(function () { toast('Cupom de teste enviado para "' + nome + '"', 'success'); })
+    .catch(function (e) { toast('Falha ao imprimir: ' + e, 'error'); });
+}
+
 function carregarConfigImpressora() {
   const pw = document.getElementById('cfgPaperWidth');
   const ap = document.getElementById('cfgAutoPrint');
@@ -7552,6 +7669,7 @@ async function fazerBackup() {
     const blob = await new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open('GET', NETWORK_BASE_URL + '/api/backup/dump', true);
+      _aplicarBearer(xhr);
       xhr.responseType = 'blob';
       xhr.onload = function() {
         if (xhr.status !== 200) { reject(new Error('HTTP ' + xhr.status)); return; }
@@ -7600,6 +7718,7 @@ function restaurarBackup() {
         const xhr = new XMLHttpRequest();
         xhr.open('POST', NETWORK_BASE_URL + '/api/backup/restore', true);
         xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+        _aplicarBearer(xhr);
         xhr.onload = function() {
           if (xhr.status !== 200) {
             let body; try { body = JSON.parse(xhr.responseText); } catch(_){ body = {}; }
@@ -7635,18 +7754,37 @@ function restaurarBackup() {
   });
 }
 
+// Pede ao SERVIDOR para apagar todos os dados (uma transacao so) e recriar os
+// seeds. Exige o token do master logado e reconfirma a senha dele.
+function _zerarNoServidor(hashSenhaMaster) {
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', NETWORK_BASE_URL + '/api/admin/zerar', false);
+  xhr.setRequestHeader('Content-Type', 'application/json');
+  _aplicarBearer(xhr);
+  xhr.send(JSON.stringify({ senha: hashSenhaMaster }));
+  if (xhr.status !== 200) {
+    let b = {};
+    try { b = JSON.parse(xhr.responseText); } catch(_) {}
+    throw new Error(b.error || ('HTTP ' + xhr.status));
+  }
+}
+
 function zerarSistema() {
-  // Exige autenticação de administrador do sistema (usuário oculto do desenvolvedor)
+  // Somente o usuario master (logado) pode zerar, e precisa digitar a senha de novo.
+  if (!usuarioLogado || usuarioLogado.nivel !== 'master') {
+    toast('Somente o usuário master pode zerar o sistema', 'error');
+    return;
+  }
   abrirModal({
-    titulo: '🔒 Autenticação de Administrador',
+    titulo: '🔒 Confirmar identidade do master',
     conteudo: `
       <div style="padding:10px;background:#fee2e2;border-left:4px solid #dc2626;border-radius:4px;margin-bottom:15px;font-size:13px;color:#991b1b">
         <b>ATENÇÃO!</b> Esta ação apagará PERMANENTEMENTE todos os dados do sistema (produtos, vendas, clientes, usuários criados, etc.). Apenas o usuário master padrão será mantido.
       </div>
       <p style="margin-bottom:10px;font-size:13px;color:#475569">
-        Para prosseguir, informe as credenciais de administrador do sistema:
+        Para prosseguir, confirme o login e a senha do usuário <b>master</b>:
       </p>
-      <div class="form-group"><label>Usuário Administrador *</label>
+      <div class="form-group"><label>Usuário master *</label>
         <input type="text" id="zsLogin" autocomplete="off" placeholder="Informe o usuário"></div>
       <div class="form-group"><label>Senha *</label>
         <input type="password" id="zsSenha" autocomplete="new-password" placeholder="Informe a senha"></div>
@@ -7657,35 +7795,26 @@ function zerarSistema() {
       const login = document.getElementById('zsLogin').value.trim();
       const senha = document.getElementById('zsSenha').value;
       if (!login || !senha) { toast('Informe usuário e senha', 'error'); return; }
-      const r = query("SELECT * FROM usuarios WHERE login=? AND senha=? AND ativo=1", [login, hashSenha(senha)]);
-      if (r.length === 0 || r[0].login !== 'admin') {
-        toast('Credenciais inválidas ou sem permissão', 'error');
+      if (login !== usuarioLogado.login) {
+        toast('Informe o login do usuário master que está logado', 'error');
         return;
       }
       fecharModal();
       confirmar('Autenticação OK. Tem certeza absoluta que deseja ZERAR todo o sistema NO SERVIDOR? Esta ação NÃO pode ser desfeita!', () => {
-        // Limpa preferências locais (backup automático, logomarca, etc.)
-        localStorage.removeItem('pdvpro_auto_backup_ativo');
-        localStorage.removeItem('pdvpro_auto_backup_pasta_nome');
-        localStorage.removeItem('pdvpro_logo_loja');
-        localStorage.removeItem(BACKUP_FOLDER_KEY);
-        autoBackupDirHandle = null;
-        backupDeFechamentoExecutado = false;
-        // No servidor: dropa todas as tabelas de dados (mantém schema das
-        // tabelas, mas apaga conteúdo) e re-roda os seeds via criarEstrutura.
         try {
-          const tabelasZerar = [
-            'venda_itens','vendas','movimentacao_estoque','caixa_movimentos','caixa',
-            'nota_entrada_itens','notas_entrada','contas_pagar','contas_receber',
-            'produtos','categorias','clientes','fornecedores',
-            'usuarios','perfis','empresa','configuracoes',
-          ];
-          for (const t of tabelasZerar) {
-            try { _sqlExecSync('DELETE FROM ' + t, []); } catch(_) {}
-          }
-          criarEstrutura(); // re-cria seeds (master, admin, perfis, empresa)
-          toast('Sistema zerado completamente. Recarregando...', 'success');
+          // 1) Servidor valida a senha e apaga tudo (transacao). Se falhar, nada muda.
+          _zerarNoServidor(hashSenha(senha));
+          // 2) So agora limpa as preferencias locais (backup automatico, logomarca, etc.)
+          localStorage.removeItem('pdvpro_auto_backup_ativo');
+          localStorage.removeItem('pdvpro_auto_backup_pasta_nome');
+          localStorage.removeItem('pdvpro_logo_loja');
+          localStorage.removeItem(BACKUP_FOLDER_KEY);
+          autoBackupDirHandle = null;
           backupDeFechamentoExecutado = true; // impede backup automático no reload
+          // 3) Encerra a sessao: o banco voltou ao estado de fabrica.
+          try { sessionStorage.removeItem('pdvpro_token'); } catch(_) {}
+          limparSessao();
+          toast('Sistema zerado completamente. Recarregando...', 'success');
           setTimeout(() => location.reload(), 1500);
         } catch(e) {
           toast('Falha ao zerar: ' + e.message, 'error');
@@ -7780,6 +7909,7 @@ async function executarBackupAutomatico(silencioso = false) {
     const data = await new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open('GET', NETWORK_BASE_URL + '/api/backup/dump', true);
+      _aplicarBearer(xhr);
       xhr.responseType = 'arraybuffer';
       xhr.onload = function() {
         if (xhr.status !== 200) { reject(new Error('HTTP ' + xhr.status)); return; }
@@ -7854,6 +7984,7 @@ window.addEventListener('beforeunload', function(e) {
     // overrideMimeType permite receber binário em XHR síncrono (sem responseType)
     const xhr = new XMLHttpRequest();
     xhr.open('GET', NETWORK_BASE_URL + '/api/backup/dump', false);
+    _aplicarBearer(xhr);
     xhr.overrideMimeType('text/plain; charset=x-user-defined');
     xhr.send(null);
     if (xhr.status !== 200) throw new Error('HTTP ' + xhr.status);
@@ -8037,6 +8168,7 @@ async function executarBackupAgendadoManual(silencioso) {
     const data = await new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open('GET', NETWORK_BASE_URL + '/api/backup/dump', true);
+      _aplicarBearer(xhr);
       xhr.responseType = 'arraybuffer';
       xhr.onload = function() {
         if (xhr.status !== 200) { reject(new Error('HTTP ' + xhr.status)); return; }
@@ -8574,7 +8706,7 @@ async function exportarRelatorio(tipo, formato) {
 
 function imprimirRelatorio() {
   const el = document.getElementById('relatorioResultado');
-  if (!el || !el.innerHTML.trim()) { toast('Gere um relat�rio primeiro', 'warning'); return; }
+  if (!el || !el.innerHTML.trim()) { toast('Gere um relatório primeiro', 'warning'); return; }
   const acoes = el.querySelector('.relatorio-acoes');
   if (acoes) acoes.remove();
   const conteudo = el.innerHTML;
@@ -8584,7 +8716,7 @@ function imprimirRelatorio() {
   document.body.appendChild(iframe);
   const doc = iframe.contentDocument || iframe.contentWindow.document;
   doc.open();
-  doc.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Relat�rio</title>');
+  doc.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Relatório</title>');
   doc.write('<style>body{font-family:Arial,sans-serif;font-size:12px;padding:20px;margin:0;} table{width:100%;border-collapse:collapse;} th,td{border:1px solid #ccc;padding:6px;text-align:left;} th{background:#f0f0f0;} .relatorio-acoes{display:none!important;} @page{margin:12mm;}</style>');
   doc.write('</head><body>');
   doc.write(conteudo);
