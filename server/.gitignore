@@ -4,3 +4,5 @@ data/
 *.db-shm
 *.db-wal
 *.restore
+.token_secret
+*.tmp

@@ -83,6 +83,46 @@ fn log_path(app: &AppHandle) -> PathBuf {
     dir.join("server.log")
 }
 
+// Configuracoes que pertencem a ESTA maquina/caixa (ex.: impressora, gaveta).
+// Ficam em terminal.json, separado do config.json: o instalador e o
+// sync_installation_config() apagam config.json a cada instalacao (para
+// perguntar o modo da maquina de novo), mas as impressoras do caixa devem
+// sobreviver a atualizacoes. NAO guarde isto no banco do servidor: o banco
+// e compartilhado por todos os caixas e cada um tem sua propria impressora.
+fn terminal_path(app: &AppHandle) -> PathBuf {
+    let dir = app
+        .path()
+        .app_config_dir()
+        .expect("nao foi possivel resolver app_config_dir");
+    fs::create_dir_all(&dir).ok();
+    dir.join("terminal.json")
+}
+
+fn read_terminal(app: &AppHandle) -> Map<String, Value> {
+    match fs::read_to_string(terminal_path(app)) {
+        Ok(s) => serde_json::from_str::<Map<String, Value>>(&s).unwrap_or_default(),
+        Err(_) => Map::new(),
+    }
+}
+
+// Abre o log do servidor em modo append (nao perde o historico a cada
+// inicializacao) e faz rotacao simples quando passa de 5 MB.
+fn open_server_log(path: &PathBuf) -> Result<fs::File, String> {
+    const MAX_BYTES: u64 = 5 * 1024 * 1024;
+    if let Ok(meta) = fs::metadata(path) {
+        if meta.len() > MAX_BYTES {
+            let rotated = path.with_extension("log.1");
+            let _ = fs::remove_file(&rotated);
+            let _ = fs::rename(path, &rotated);
+        }
+    }
+    fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|e| e.to_string())
+}
+
 fn read_config(app: &AppHandle) -> Map<String, Value> {
     let p = config_path(app);
     match fs::read_to_string(&p) {
@@ -170,6 +210,24 @@ fn save_config(app: AppHandle, config: Value) -> Result<(), String> {
     write_config(&app, &cfg)
 }
 
+// Configuracoes locais deste caixa (impressora, gaveta, etc.).
+#[tauri::command]
+fn get_terminal_settings(app: AppHandle) -> Value {
+    Value::Object(read_terminal(&app))
+}
+
+#[tauri::command]
+fn save_terminal_settings(app: AppHandle, settings: Value) -> Result<(), String> {
+    let mut cfg = read_terminal(&app);
+    if let Value::Object(incoming) = settings {
+        for (k, v) in incoming {
+            cfg.insert(k, v);
+        }
+    }
+    let s = serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?;
+    fs::write(terminal_path(&app), s).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn ensure_identificador(app: AppHandle) -> Result<String, String> {
     let mut cfg = read_config(&app);
@@ -227,7 +285,7 @@ fn start_embedded_server(app: AppHandle, state: State<ServerState>) -> Result<()
     let data = data_dir(&app);
     let log = log_path(&app);
 
-    let log_file = fs::File::create(&log).map_err(|e| e.to_string())?;
+    let log_file = open_server_log(&log)?;
     let err_file = log_file.try_clone().map_err(|e| e.to_string())?;
 
     let mut cmd = Command::new(&node_bin);
@@ -237,6 +295,27 @@ fn start_embedded_server(app: AppHandle, state: State<ServerState>) -> Result<()
         .env("PDV_DATA_DIR", &data)
         .stdout(Stdio::from(log_file))
         .stderr(Stdio::from(err_file));
+
+    // Opcoes avancadas vindas do config.json desta maquina (todas opcionais):
+    //   auth_mode        "soft" | "strict"  -> PDV_AUTH_MODE
+    //   backup_dir_extra pasta de copia dos backups (pen drive/rede)
+    //   backup_hora      hora (0-23) do backup automatico diario
+    let cfg = read_config(&app);
+    if let Some(Value::String(mode)) = cfg.get("auth_mode") {
+        if mode == "soft" || mode == "strict" {
+            cmd.env("PDV_AUTH_MODE", mode);
+        }
+    }
+    if let Some(Value::String(dir)) = cfg.get("backup_dir_extra") {
+        if !dir.trim().is_empty() {
+            cmd.env("PDV_BACKUP_DIR_EXTRA", dir.trim());
+        }
+    }
+    if let Some(h) = cfg.get("backup_hora").and_then(|v| v.as_u64()) {
+        if h <= 23 {
+            cmd.env("PDV_BACKUP_HORA", h.to_string());
+        }
+    }
 
     // Diretorio de trabalho = pasta do server (acha node_modules).
     if let Some(parent) = server_js.parent() {
@@ -268,7 +347,32 @@ fn list_printers() -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
+fn default_printer() -> Result<String, String> {
+    printing::imp::default_printer()
+}
+
+#[tauri::command]
 fn print_raw(printer: String, data: Vec<u8>) -> Result<(), String> {
+    printing::imp::print_raw(&printer, &data)
+}
+
+// Imprime um cupom de teste ESC/POS (botao "Testar impressora").
+#[tauri::command]
+fn print_test(printer: String) -> Result<(), String> {
+    let mut data: Vec<u8> = Vec::new();
+    data.extend_from_slice(&[0x1B, 0x40]); // ESC @  (inicializa)
+    data.extend_from_slice(&[0x1B, 0x61, 0x01]); // centralizado
+    data.extend_from_slice(&[0x1B, 0x45, 0x01]); // negrito
+    data.extend_from_slice(b"TESTE DE IMPRESSAO\n");
+    data.extend_from_slice(&[0x1B, 0x45, 0x00]);
+    data.extend_from_slice(b"System PDV PRO\n");
+    data.extend_from_slice(b"--------------------------------\n");
+    data.extend_from_slice(b"Impressora: ");
+    data.extend_from_slice(printer.trim().as_bytes());
+    data.extend_from_slice(b"\n");
+    data.extend_from_slice(b"Se voce leu isto, esta tudo certo.\n");
+    data.extend_from_slice(&[0x0A, 0x0A, 0x0A, 0x0A]);
+    data.extend_from_slice(&[0x1D, 0x56, 0x42, 0x00]); // corte parcial
     printing::imp::print_raw(&printer, &data)
 }
 
@@ -289,6 +393,9 @@ fn save_file_bytes(dir: String, filename: String, data: Vec<u8>) -> Result<Strin
         .chars()
         .map(|c| if c == '/' || c == '\\' { '_' } else { c })
         .collect();
+    if safe.trim().is_empty() || safe == "." || safe == ".." {
+        return Err("nome de arquivo invalido".into());
+    }
     let full = d.join(&safe);
     fs::write(&full, &data).map_err(|e| format!("gravar '{}': {}", full.display(), e))?;
     Ok(full.to_string_lossy().to_string())
@@ -329,12 +436,16 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_config,
             save_config,
+            get_terminal_settings,
+            save_terminal_settings,
             ensure_identificador,
             hostname,
             start_embedded_server,
             read_server_log_tail,
             list_printers,
+            default_printer,
             print_raw,
+            print_test,
             open_drawer,
             save_file_bytes
         ])

@@ -176,20 +176,102 @@ const SCHEMA_SQL = `
     );
 `;
 
-function inicializarSchema(db) {
-  db.exec(SCHEMA_SQL);
+// ----------------------------------------------------------------------
+// Hashes de credenciais conhecidas/comprometidas.
+//  - SENHA_PADRAO_MASTER_HASH: hash da senha de fabrica do usuario `master`.
+//    Nao e bloqueada (o sistema precisa de um primeiro acesso), mas o login
+//    avisa o front-end (`senha_padrao: true`) e o servidor registra aviso.
+//  - HASH_ADMIN_LEGADO: hash da senha do antigo usuario `admin` embutido
+//    nas versoes anteriores. Essa senha foi publicada no repositorio, entao
+//    qualquer usuario com esse hash e desativado automaticamente (migracao
+//    + triggers), mesmo que o front-end (criarEstrutura) tente recria-lo.
+// ----------------------------------------------------------------------
+const SENHA_PADRAO_MASTER_HASH = 'Hf3ucht_22';
+const HASH_ADMIN_LEGADO = 'Hi5mpb0_28';
 
-  // Seeds idempotentes (espelham criarEstrutura do app.html).
-  const seedUser = db.prepare(
-    'INSERT INTO usuarios (nome, login, senha, nivel, ativo) VALUES (?, ?, ?, ?, 1)'
-  );
-  const countUser = db.prepare('SELECT COUNT(*) AS c FROM usuarios WHERE login=?');
+// ----------------------------- Migrations -----------------------------
+// Controladas por PRAGMA user_version. Cada migration roda uma unica vez
+// por banco (e e idempotente, para bancos antigos que partem de versao 0).
+// Para evoluir o schema no futuro: ADICIONE uma nova funcao ao final do
+// array — nunca edite as anteriores.
+const MIGRATIONS = [
+  // v1 — estrutura base (identica ao criarEstrutura() do app.html)
+  function v1_base(db) {
+    db.exec(SCHEMA_SQL);
+  },
 
-  if (countUser.get('master').c === 0) {
-    seedUser.run('Administrador Master', 'master', hashSenha('master'), 'master');
+  // v2 — indices de desempenho (relatorios e PDV ficam lentos sem eles
+  // conforme o historico de vendas cresce). Falha de um indice nunca
+  // impede a inicializacao.
+  function v2_indices(db, log) {
+    const indices = [
+      'CREATE INDEX IF NOT EXISTS idx_vendas_data ON vendas(data)',
+      'CREATE INDEX IF NOT EXISTS idx_vendas_status_data ON vendas(status, data)',
+      'CREATE INDEX IF NOT EXISTS idx_vendas_caixa ON vendas(caixa_id)',
+      'CREATE INDEX IF NOT EXISTS idx_vendas_cliente ON vendas(cliente_id)',
+      'CREATE INDEX IF NOT EXISTS idx_venda_itens_venda ON venda_itens(venda_id)',
+      'CREATE INDEX IF NOT EXISTS idx_venda_itens_produto ON venda_itens(produto_id)',
+      'CREATE INDEX IF NOT EXISTS idx_produtos_codigo ON produtos(codigo)',
+      'CREATE INDEX IF NOT EXISTS idx_produtos_barras ON produtos(codigo_barras)',
+      'CREATE INDEX IF NOT EXISTS idx_produtos_categoria ON produtos(categoria_id)',
+      'CREATE INDEX IF NOT EXISTS idx_mov_estoque_produto ON movimentacao_estoque(produto_id, data)',
+      'CREATE INDEX IF NOT EXISTS idx_caixa_mov_caixa ON caixa_movimentos(caixa_id)',
+      'CREATE INDEX IF NOT EXISTS idx_contas_pagar_status_venc ON contas_pagar(status, data_vencimento)',
+      'CREATE INDEX IF NOT EXISTS idx_contas_receber_status_venc ON contas_receber(status, data_vencimento)',
+    ];
+    for (const sql of indices) {
+      try { db.exec(sql); } catch (e) { log('migracao v2: indice ignorado:', e.message); }
+    }
+  },
+
+  // v3 — seguranca: neutraliza a credencial `admin` publicada no repositorio.
+  function v3_bloqueia_admin_legado(db) {
+    db.prepare('UPDATE usuarios SET ativo = 0 WHERE senha = ?').run(HASH_ADMIN_LEGADO);
+    db.exec(`
+      CREATE TRIGGER IF NOT EXISTS trg_bloqueia_senha_legada_ins
+      AFTER INSERT ON usuarios
+      WHEN NEW.senha = '${HASH_ADMIN_LEGADO}'
+      BEGIN
+        UPDATE usuarios SET ativo = 0 WHERE id = NEW.id;
+      END;
+      CREATE TRIGGER IF NOT EXISTS trg_bloqueia_senha_legada_upd
+      AFTER UPDATE ON usuarios
+      WHEN NEW.senha = '${HASH_ADMIN_LEGADO}' AND COALESCE(NEW.ativo, 1) <> 0
+      BEGIN
+        UPDATE usuarios SET ativo = 0 WHERE id = NEW.id;
+      END;
+    `);
+  },
+];
+
+function executarMigrations(db, log) {
+  const atual = db.pragma('user_version', { simple: true });
+  for (let v = atual; v < MIGRATIONS.length; v++) {
+    const migracao = MIGRATIONS[v];
+    const aplicar = db.transaction(() => {
+      migracao(db, log);
+      db.pragma('user_version = ' + (v + 1));
+    });
+    aplicar();
+    log('Banco migrado para a versao ' + (v + 1) + ' (' + migracao.name + ')');
   }
-  if (countUser.get('admin').c === 0) {
-    seedUser.run('Administrador do Sistema', 'admin', hashSenha('Silv@193085!'), 'master');
+}
+
+// Seeds idempotentes (espelham criarEstrutura do app.html), exceto o antigo
+// usuario `admin`, que nao e mais criado.
+function aplicarSeeds(db) {
+  const temMasterAtivo = db
+    .prepare("SELECT COUNT(*) AS c FROM usuarios WHERE nivel='master' AND ativo=1 AND senha <> ?")
+    .get(HASH_ADMIN_LEGADO).c > 0;
+  if (!temMasterAtivo) {
+    // Garante que sempre exista um acesso inicial. Se ja existe o login
+    // `master` (ex.: inativo), nao tenta recriar para nao violar UNIQUE.
+    const existe = db.prepare("SELECT id FROM usuarios WHERE login='master'").get();
+    if (!existe) {
+      db.prepare(
+        'INSERT INTO usuarios (nome, login, senha, nivel, ativo) VALUES (?, ?, ?, ?, 1)'
+      ).run('Administrador Master', 'master', hashSenha('master'), 'master');
+    }
   }
 
   if (db.prepare('SELECT COUNT(*) AS c FROM empresa').get().c === 0) {
@@ -208,4 +290,17 @@ function inicializarSchema(db) {
   }
 }
 
-module.exports = { inicializarSchema, hashSenha };
+function inicializarSchema(db, log) {
+  const logger = typeof log === 'function' ? log : () => {};
+  executarMigrations(db, logger);
+  aplicarSeeds(db);
+}
+
+module.exports = {
+  inicializarSchema,
+  hashSenha,
+  PERMISSOES_TODAS,
+  SENHA_PADRAO_MASTER_HASH,
+  HASH_ADMIN_LEGADO,
+  SCHEMA_VERSION: MIGRATIONS.length,
+};

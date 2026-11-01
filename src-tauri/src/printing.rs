@@ -17,9 +17,10 @@ pub mod imp {
         s.encode_utf16().chain(std::iter::once(0)).collect()
     }
 
-    pub fn list_printers() -> Result<Vec<String>, String> {
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        let script = "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; Get-PnpDevice -Class PrintQueue -PresentOnly -Status OK -ErrorAction Stop | ForEach-Object { $_.FriendlyName }";
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+    // Executa um script PowerShell e devolve as linhas nao vazias do stdout.
+    fn powershell_lines(script: &str) -> Result<Vec<String>, String> {
         let output = Command::new("powershell.exe")
             .args(["-NoProfile", "-NonInteractive", "-Command", script])
             .creation_flags(CREATE_NO_WINDOW)
@@ -43,12 +44,50 @@ pub mod imp {
             .collect())
     }
 
+    // Lista as impressoras pelo NOME DO SPOOLER (Get-Printer / Win32_Printer),
+    // que e exatamente o nome aceito por OpenPrinterW. A versao anterior usava
+    // Get-PnpDevice, cujo "FriendlyName" frequentemente difere do nome da fila
+    // de impressao (ex.: impressora renomeada para "CAIXA 02") e nao inclui
+    // impressoras compartilhadas de rede — por isso a impressao falhava em
+    // alguns caixas mesmo com a impressora selecionada.
+    pub fn list_printers() -> Result<Vec<String>, String> {
+        let script = "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; \
+            try { Get-Printer -ErrorAction Stop | ForEach-Object { $_.Name } } \
+            catch { Get-CimInstance -ClassName Win32_Printer | ForEach-Object { $_.Name } }";
+        let mut names = powershell_lines(script)?;
+        let mut seen = std::collections::HashSet::new();
+        names.retain(|n| seen.insert(n.clone()));
+        Ok(names)
+    }
+
+    // Impressora padrao do Windows nesta maquina (vazio se nao houver).
+    pub fn default_printer() -> Result<String, String> {
+        let script = "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; \
+            (Get-CimInstance -ClassName Win32_Printer | Where-Object { $_.Default } | \
+            Select-Object -First 1).Name";
+        Ok(powershell_lines(script)?.into_iter().next().unwrap_or_default())
+    }
+
     pub fn print_raw(printer: &str, data: &[u8]) -> Result<(), String> {
+        let printer = printer.trim();
+        if printer.is_empty() {
+            return Err(
+                "nenhuma impressora configurada neste caixa — selecione uma em Configurações > Impressora"
+                    .into(),
+            );
+        }
+        if data.is_empty() {
+            return Ok(());
+        }
         unsafe {
             let pname = wide(printer);
             let mut hprinter = HANDLE::default();
-            OpenPrinterW(PCWSTR(pname.as_ptr()), &mut hprinter, None)
-                .map_err(|e| format!("OpenPrinter('{}'): {}", printer, e))?;
+            OpenPrinterW(PCWSTR(pname.as_ptr()), &mut hprinter, None).map_err(|e| {
+                format!(
+                    "OpenPrinter('{}'): {} — confira se a impressora existe e está ligada neste computador",
+                    printer, e
+                )
+            })?;
 
             let result = (|| -> Result<(), String> {
                 let mut docname = wide("Cupom System PDV PRO");
@@ -62,29 +101,42 @@ pub mod imp {
                 if job == 0 {
                     return Err("StartDocPrinter falhou".into());
                 }
-                if !StartPagePrinter(hprinter).as_bool() {
-                    return Err("StartPagePrinter falhou".into());
-                }
-                let mut written: u32 = 0;
-                let ok = WritePrinter(
-                    hprinter,
-                    data.as_ptr() as *const core::ffi::c_void,
-                    data.len() as u32,
-                    &mut written,
-                );
-                let _ = EndPagePrinter(hprinter);
+
+                // A partir daqui o documento esta aberto: SEMPRE encerra,
+                // mesmo se a pagina ou a escrita falhar (evita job travado
+                // na fila do spooler).
+                let outcome = (|| -> Result<(), String> {
+                    if !StartPagePrinter(hprinter).as_bool() {
+                        return Err("StartPagePrinter falhou".into());
+                    }
+                    let mut offset: usize = 0;
+                    while offset < data.len() {
+                        let chunk = &data[offset..];
+                        let mut written: u32 = 0;
+                        let ok = WritePrinter(
+                            hprinter,
+                            chunk.as_ptr() as *const core::ffi::c_void,
+                            chunk.len() as u32,
+                            &mut written,
+                        );
+                        if !ok.as_bool() {
+                            return Err("WritePrinter falhou".into());
+                        }
+                        if written == 0 {
+                            return Err(format!(
+                                "WritePrinter escreveu 0 bytes ({} de {})",
+                                offset,
+                                data.len()
+                            ));
+                        }
+                        offset += written as usize;
+                    }
+                    let _ = EndPagePrinter(hprinter);
+                    Ok(())
+                })();
+
                 let _ = EndDocPrinter(hprinter);
-                if !ok.as_bool() {
-                    return Err("WritePrinter falhou".into());
-                }
-                if written as usize != data.len() {
-                    return Err(format!(
-                        "WritePrinter escreveu {} de {} bytes",
-                        written,
-                        data.len()
-                    ));
-                }
-                Ok(())
+                outcome
             })();
 
             let _ = ClosePrinter(hprinter);
@@ -109,6 +161,9 @@ pub mod imp {
 pub mod imp {
     pub fn list_printers() -> Result<Vec<String>, String> {
         Ok(vec![])
+    }
+    pub fn default_printer() -> Result<String, String> {
+        Ok(String::new())
     }
     pub fn print_raw(_printer: &str, _data: &[u8]) -> Result<(), String> {
         Err("Impressão nativa disponível apenas no Windows".into())
