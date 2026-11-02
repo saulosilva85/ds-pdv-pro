@@ -32,8 +32,7 @@ const cors = require('cors');
 const Database = require('better-sqlite3');
 const { WebSocketServer } = require('ws');
 const {
-  inicializarSchema, hashSenha, zerarDados, PERMISSOES_TODAS,
-  SENHA_PADRAO_MASTER_HASH, SCHEMA_VERSION,
+  inicializarSchema, hashSenha, zerarDados, PERMISSOES_TODAS, SCHEMA_VERSION,
 } = require('./schema');
 const sec = require('./security');
 const bkp = require('./backup');
@@ -85,17 +84,6 @@ function openDatabase() {
 let db = openDatabase();
 log('Banco pronto em', DB_PATH, '(schema v' + SCHEMA_VERSION + ')');
 
-function avisarSenhaPadrao() {
-  try {
-    const r = db.prepare("SELECT COUNT(*) AS c FROM usuarios WHERE login='master' AND senha=? AND ativo=1")
-      .get(SENHA_PADRAO_MASTER_HASH);
-    if (r.c > 0) {
-      log('ATENCAO: o usuario "master" ainda usa a senha padrao. Troque-a em Usuarios.');
-    }
-  } catch (_) { /* ignora */ }
-}
-avisarSenhaPadrao();
-
 // better-sqlite3 nao aceita undefined nem boolean como parametro de bind.
 function normParams(params) {
   if (!Array.isArray(params)) return [];
@@ -139,7 +127,9 @@ function carregarUsuarioAuth(id) {
   }
   // Mesmo criterio do front-end: nivel `admin` (perfil ADMINISTRADOR) tem acesso total.
   if (u.nivel === 'admin') permissoes = PERMISSOES_TODAS.slice();
-  return { id: u.id, login: u.login, nivel: u.nivel, permissoes };
+  // O usuario `master` e sempre master, mesmo que o campo `nivel` tenha sido regravado.
+  const nivel = u.login === 'master' ? 'master' : u.nivel;
+  return { id: u.id, login: u.login, nivel, permissoes };
 }
 
 let semTokenDesdeUltimoLog = 0;
@@ -219,13 +209,12 @@ app.post('/api/auth/login', (req, res) => {
       return res.status(401).json({ error: 'Usuário ou senha inválidos' });
     }
     limitadorLogin.registrarSucesso(ip, login);
-    const senhaPadrao = usuario.senha === SENHA_PADRAO_MASTER_HASH;
     const seguro = Object.assign({}, usuario);
     delete seguro.senha; // nunca devolve a senha/hash ao cliente
+    if (usuario.login === 'master') seguro.nivel = 'master';
     res.json({
       usuario: seguro,
       token: sec.criarToken(SECRET, usuario),
-      senha_padrao: senhaPadrao,
     });
   } catch (e) {
     log('login erro:', e.message);
@@ -300,7 +289,7 @@ app.post('/api/sql/exec-batch', autenticar, (req, res) => {
 app.post('/api/admin/zerar', autenticar, (req, res) => {
   const u = req.usuarioAuth;
   if (!u) return res.status(401).json({ error: 'Faca login para executar esta acao.' });
-  if (u.nivel !== 'master') return res.status(403).json({ error: 'Somente o usuario master pode zerar o sistema.' });
+  if (u.login !== 'master') return res.status(403).json({ error: 'Somente o usuario master pode zerar o sistema.' });
   const chaveLimite = 'zerar:' + u.login;
   const espera = limitadorLogin.bloqueadoPorSegundos(ipDe(req), chaveLimite);
   if (espera > 0) return res.status(429).json({ error: 'Muitas tentativas. Aguarde alguns minutos.' });

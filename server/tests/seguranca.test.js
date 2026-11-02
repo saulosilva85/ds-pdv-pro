@@ -3,7 +3,7 @@ const assert = require('node:assert');
 const fs = require('fs'), os = require('os'), path = require('path');
 const Database = require('./adapter');
 const S = '../';
-const { inicializarSchema, hashSenha, zerarDados, HASH_ADMIN_LEGADO, SENHA_PADRAO_MASTER_HASH, SCHEMA_VERSION } = require(S + 'schema');
+const { inicializarSchema, hashSenha, zerarDados, HASH_ADMIN_LEGADO, SENHA_PADRAO_MASTER_HASH, SENHA_MASTER_ANTIGA_HASH, SCHEMA_VERSION } = require(S + 'schema');
 const sec = require(S + 'security');
 const bkp = require(S + 'backup');
 
@@ -65,7 +65,7 @@ test('senha: aceita hash pronto e texto puro; recusa errada', () => {
   assert.ok(sec.senhaConfere(h, 'abc123', hashSenha));
   assert.ok(!sec.senhaConfere(h, 'errada', hashSenha));
   assert.ok(!sec.senhaConfere(h, '', hashSenha));
-  assert.equal(hashSenha('master'), SENHA_PADRAO_MASTER_HASH);
+  assert.equal(hashSenha('master'), SENHA_MASTER_ANTIGA_HASH); // a antiga senha de fabrica continua sendo reconhecida so para migracao
 });
 
 test('token: valido, adulterado, expirado, formato invalido', () => {
@@ -214,4 +214,31 @@ test('backup: novos arquivos usam o prefixo ds_pdv_pro', async () => {
   const novo = await bkp.criarBackup(db, bdir, 'auto', new Date(2026, 10, 3, 23, 0, 0));
   assert.match(path.basename(novo), /^ds_pdv_pro-auto-20261103-230000\.db$/);
   assert.equal(bkp.listarBackups(bdir).length, 1);
+});
+
+test('master: banco novo ja nasce com a senha padrao nova; a antiga "master" nao funciona mais', () => {
+  const db = new Database(path.join(tmp(), 'k.db')); inicializarSchema(db, log);
+  const m = db.prepare("SELECT senha FROM usuarios WHERE login='master'").get();
+  assert.equal(m.senha, SENHA_PADRAO_MASTER_HASH);
+  assert.ok(sec.senhaConfere(m.senha, SENHA_PADRAO_MASTER_HASH, hashSenha));
+  assert.ok(!sec.senhaConfere(m.senha, 'master', hashSenha));
+});
+
+test('migration v5: master com a senha antiga passa para a nova; senha escolhida pelo dono nao e tocada', () => {
+  const a = new Database(path.join(tmp(), 'l.db')); inicializarSchema(a, log);
+  a.prepare("UPDATE usuarios SET senha=? WHERE login='master'").run(SENHA_MASTER_ANTIGA_HASH);
+  a.exec('PRAGMA user_version = 4'); inicializarSchema(a, log);
+  assert.equal(a.prepare("SELECT senha FROM usuarios WHERE login='master'").get().senha, SENHA_PADRAO_MASTER_HASH);
+
+  const b = new Database(path.join(tmp(), 'm.db')); inicializarSchema(b, log);
+  b.prepare("UPDATE usuarios SET senha='Hcustom_1' WHERE login='master'").run();
+  b.exec('PRAGMA user_version = 4'); inicializarSchema(b, log);
+  assert.equal(b.prepare("SELECT senha FROM usuarios WHERE login='master'").get().senha, 'Hcustom_1');
+});
+
+test('zerarDados: o master recriado usa a senha padrao nova', () => {
+  const db = new Database(path.join(tmp(), 'n.db')); inicializarSchema(db, log);
+  db.prepare("UPDATE usuarios SET senha='Hcustom_1' WHERE login='master'").run();
+  zerarDados(db);
+  assert.equal(db.prepare("SELECT senha FROM usuarios WHERE login='master'").get().senha, SENHA_PADRAO_MASTER_HASH);
 });

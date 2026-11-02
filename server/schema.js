@@ -177,16 +177,18 @@ const SCHEMA_SQL = `
 `;
 
 // ----------------------------------------------------------------------
-// Hashes de credenciais conhecidas/comprometidas.
-//  - SENHA_PADRAO_MASTER_HASH: hash da senha de fabrica do usuario `master`.
-//    Nao e bloqueada (o sistema precisa de um primeiro acesso), mas o login
-//    avisa o front-end (`senha_padrao: true`) e o servidor registra aviso.
-//  - HASH_ADMIN_LEGADO: hash da senha do antigo usuario `admin` embutido
-//    nas versoes anteriores. Essa senha foi publicada no repositorio, entao
+// Hashes de credenciais.
+//  - SENHA_PADRAO_MASTER_HASH: hash da senha padrao do usuario `master`
+//    (somente o hash fica no codigo — nunca a senha em texto).
+//  - SENHA_MASTER_ANTIGA_HASH: hash da antiga senha de fabrica ("master"),
+//    usado apenas para migrar instalacoes que ainda a utilizavam.
+//  - HASH_ADMIN_LEGADO: hash da senha do antigo usuario `admin` embutido nas
+//    versoes anteriores. Essa senha foi publicada no repositorio, entao
 //    qualquer usuario com esse hash e desativado automaticamente (migracao
-//    + triggers), mesmo que o front-end (criarEstrutura) tente recria-lo.
+//    + triggers), mesmo que o front-end tente recria-lo.
 // ----------------------------------------------------------------------
-const SENHA_PADRAO_MASTER_HASH = 'Hf3ucht_22';
+const SENHA_PADRAO_MASTER_HASH = 'H3wdsag_24';
+const SENHA_MASTER_ANTIGA_HASH = 'Hf3ucht_22';
 const HASH_ADMIN_LEGADO = 'Hi5mpb0_28';
 
 const INDICES_SQL = [
@@ -306,6 +308,13 @@ const MIGRATIONS = [
     }
     criarIndices(db, log);
   },
+
+  // v5 — senha padrao do master. Instalacoes que ainda usam a antiga senha de
+  // fabrica passam para a nova; quem ja tinha outra senha nao e alterado.
+  function v5_senha_padrao_master(db) {
+    db.prepare("UPDATE usuarios SET senha = ? WHERE login = 'master' AND senha = ?")
+      .run(SENHA_PADRAO_MASTER_HASH, SENHA_MASTER_ANTIGA_HASH);
+  },
 ];
 
 function executarMigrations(db, log) {
@@ -334,7 +343,7 @@ function aplicarSeeds(db) {
     if (!existe) {
       db.prepare(
         'INSERT INTO usuarios (nome, login, senha, nivel, ativo) VALUES (?, ?, ?, ?, 1)'
-      ).run('Administrador Master', 'master', hashSenha('master'), 'master');
+      ).run('Administrador Master', 'master', SENHA_PADRAO_MASTER_HASH, 'master');
     }
   }
 
@@ -385,6 +394,7 @@ module.exports = {
   hashSenha,
   PERMISSOES_TODAS,
   SENHA_PADRAO_MASTER_HASH,
+  SENHA_MASTER_ANTIGA_HASH,
   HASH_ADMIN_LEGADO,
   SCHEMA_VERSION: MIGRATIONS.length,
 };

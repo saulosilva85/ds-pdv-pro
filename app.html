@@ -2342,7 +2342,6 @@ function _fazerLoginCore(e) {
   let usuarioAutenticado = null;
   let apiRespondeu = false;   // o servidor respondeu explicitamente (senha errada / bloqueio)
   let msgErroLogin = '';
-  let senhaPadrao = false;
   try {
     const xhrAuth = new XMLHttpRequest();
     xhrAuth.open('POST', NETWORK_BASE_URL + '/api/auth/login', false);
@@ -2352,7 +2351,6 @@ function _fazerLoginCore(e) {
       const body = JSON.parse(xhrAuth.responseText);
       if (body && body.usuario) {
         usuarioAutenticado = body.usuario;
-        senhaPadrao = !!body.senha_padrao;
         if (body.token) sessionStorage.setItem('pdvpro_token', body.token);
       }
     } else if (xhrAuth.status === 401 || xhrAuth.status === 403 || xhrAuth.status === 429) {
@@ -2375,7 +2373,6 @@ function _fazerLoginCore(e) {
     toast(msgErroLogin || 'Usuario ou senha invalidos', 'error');
     return false;
   }
-  _senhaPadraoPendente = senhaPadrao;
 
   usuarioLogado = usuarioAutenticado;
 
@@ -2407,43 +2404,9 @@ function _fazerLoginCore(e) {
     try { _iniciarBackupAgendado(); } catch(err) { console.warn('_iniciarBackupAgendado falhou:', err); }
   })();
   toast('Bem-vindo(a), ' + usuarioLogado.nome + '!');
-  if (_senhaPadraoPendente) setTimeout(_exigirTrocaSenhaPadrao, 600);
   return false;
 }
 
-// O usuario master ainda usa a senha de fabrica: pede a troca logo apos o login.
-// (O servidor informa isso em `senha_padrao`; se fechar o aviso, ele volta no proximo login.)
-let _senhaPadraoPendente = false;
-function _exigirTrocaSenhaPadrao() {
-  if (!usuarioLogado || usuarioLogado.login !== 'master') return;
-  abrirModal({
-    titulo: '🔐 Troque a senha padrão',
-    conteudo: `
-      <div style="padding:10px;background:#fef3c7;border-left:4px solid #ca8a04;border-radius:4px;margin-bottom:15px;font-size:13px;color:#92400e">
-        Este sistema ainda usa a <b>senha padrão</b> do usuário master. Defina uma nova senha agora para proteger seus dados.
-      </div>
-      <div class="form-group"><label>Nova senha * (mínimo 6 caracteres)</label>
-        <input type="password" id="tpNova" autocomplete="new-password"></div>
-      <div class="form-group"><label>Confirmar nova senha *</label>
-        <input type="password" id="tpConf" autocomplete="new-password"></div>
-    `,
-    tamanho: 'small',
-    textoConfirm: 'Salvar nova senha',
-    onConfirm: () => {
-      const nova = document.getElementById('tpNova').value;
-      const conf = document.getElementById('tpConf').value;
-      if (nova.length < 6) { toast('Use ao menos 6 caracteres', 'error'); return; }
-      if (nova !== conf) { toast('A confirmação não confere', 'error'); return; }
-      if (nova.toLowerCase() === 'master') { toast('Escolha uma senha diferente da padrão', 'error'); return; }
-      try {
-        execute("UPDATE usuarios SET senha=? WHERE id=?", [hashSenha(nova), usuarioLogado.id]);
-        _senhaPadraoPendente = false;
-        fecharModal();
-        toast('Senha alterada com sucesso');
-      } catch (e) { toast('Erro ao salvar a senha: ' + e.message, 'error'); }
-    }
-  });
-}
 
 // Esconde itens do menu conforme permissões do usuário
 function aplicarPermissoesMenu() {
@@ -5377,8 +5340,8 @@ function abrirModalUsuario(id) {
         <div><label>Login *</label><input id="usLogin" value="${u.login}" ${u.login==='master'?'readonly':''} required></div>
         <div><label>Perfil de Acesso *</label><select id="usPerfil">${optsP}</select></div>
       </div>
-      <div class="form-group"><label>${id ? 'Nova Senha (deixe em branco para manter)' : 'Senha *'}</label>
-        <input type="password" id="usSenha" ${id ? '' : 'required'}></div>
+      ${u.login === 'master' ? '' : `<div class="form-group"><label>${id ? 'Nova Senha (deixe em branco para manter)' : 'Senha *'}</label>
+        <input type="password" id="usSenha" ${id ? '' : 'required'}></div>`}
       <div class="form-group"><label><input type="checkbox" id="usAtivo" ${u.ativo ? 'checked' : ''}> Usuário ativo</label></div>
       <div style="font-size:12px;color:#64748b;padding:8px;background:#f8fafc;border-radius:6px">
         💡 O perfil define quais telas e funções o usuário pode acessar. Gerencie perfis em <b>Perfis de Usuário</b>.
@@ -5388,7 +5351,8 @@ function abrirModalUsuario(id) {
       const nome = document.getElementById('usNome').value.trim();
       const login = document.getElementById('usLogin').value.trim();
       const perfilId = parseInt(document.getElementById('usPerfil').value, 10);
-      const senha = document.getElementById('usSenha').value;
+      const campoSenha = document.getElementById('usSenha'); // nao existe para o usuario master
+      const senha = campoSenha ? campoSenha.value : '';
       const ativo = document.getElementById('usAtivo').checked ? 1 : 0;
       if (!nome || !login) { toast('Nome e login são obrigatórios', 'error'); return; }
       if (login.toLowerCase() === 'admin') { toast('O login "admin" é reservado pelo sistema', 'error'); return; }
@@ -5404,6 +5368,7 @@ function abrirModalUsuario(id) {
         else if (pnome === 'CAIXA') nivel = 'caixa';
         else nivel = pnome.toLowerCase();
       }
+      if (u.login === 'master') nivel = 'master'; // editar o master nunca muda o nivel dele
       try {
         if (id) {
           if (senha) execute("UPDATE usuarios SET nome=?, login=?, nivel=?, perfil_id=?, senha=?, ativo=? WHERE id=?",
@@ -7771,7 +7736,7 @@ function _zerarNoServidor(hashSenhaMaster) {
 
 function zerarSistema() {
   // Somente o usuario master (logado) pode zerar, e precisa digitar a senha de novo.
-  if (!usuarioLogado || usuarioLogado.nivel !== 'master') {
+  if (!usuarioLogado || usuarioLogado.login !== 'master') {
     toast('Somente o usuário master pode zerar o sistema', 'error');
     return;
   }
