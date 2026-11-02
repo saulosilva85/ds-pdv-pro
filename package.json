@@ -1,8 +1,8 @@
 {
-  "name": "system-pdv-pro",
+  "name": "ds-pdv-pro",
   "version": "2.0.0",
   "private": true,
-  "description": "System PDV PRO - frente de loja (desktop Tauri + servidor Node/SQLite)",
+  "description": "DS PDV PRO - frente de loja (desktop Tauri + servidor Node/SQLite)",
   "scripts": {
     "build:frontend": "node scripts/build-frontend.js",
     "tauri": "tauri",

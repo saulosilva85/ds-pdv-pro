@@ -1,7 +1,7 @@
 'use strict';
 
 // =====================================================================
-// System PDV PRO — Servidor de rede (API HTTP + SQLite + WebSocket)
+// DS PDV PRO — Servidor de rede (API HTTP + SQLite + WebSocket)
 // ---------------------------------------------------------------------
 // Implementa o contrato consumido pelo front-end (app.html / index.html),
 // sem alterar o layout. O front envia SQL; este servidor executa via
@@ -46,7 +46,7 @@ const HOST = process.env.PDV_HOST || '0.0.0.0';
 // (Tauri) o app passa PDV_DATA_DIR apontando para a pasta de dados do app.
 const DATA_DIR = process.env.PDV_DATA_DIR || path.join(__dirname, 'data');
 fs.mkdirSync(DATA_DIR, { recursive: true });
-const DB_PATH = process.env.PDV_DB_PATH || path.join(DATA_DIR, 'system_pdv_pro.db');
+const DB_PATH = process.env.PDV_DB_PATH || path.join(DATA_DIR, 'ds_pdv_pro.db');
 
 // Diretorio dos arquivos estaticos (index.html / app.html). Por padrao a
 // raiz do repositorio (um nivel acima de server/).
@@ -196,7 +196,7 @@ app.get('/api/health', (req, res) => {
 
 // Usado pela tela de setup (index.html) para validar conexao do caixa.
 app.get('/api/identidade', (req, res) => {
-  res.json({ version: VERSION, nome: 'System PDV PRO', hostname: os.hostname() });
+  res.json({ version: VERSION, nome: 'DS PDV PRO', hostname: os.hostname() });
 });
 
 app.post('/api/auth/login', (req, res) => {
@@ -375,7 +375,7 @@ app.get('/api/backup/dump', autenticar, async (req, res) => {
     await db.backup(tmp);
     const buf = fs.readFileSync(tmp);
     res.setHeader('Content-Type', 'application/octet-stream');
-    res.setHeader('Content-Disposition', 'attachment; filename="system_pdv_pro.db"');
+    res.setHeader('Content-Disposition', 'attachment; filename="ds_pdv_pro.db"');
     res.send(buf);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -484,7 +484,7 @@ setInterval(() => {
 }, 30000).unref();
 
 server.listen(PORT, HOST, () => {
-  log(`System PDV PRO Server v${VERSION} ouvindo em http://${HOST}:${PORT}`);
+  log(`DS PDV PRO Server v${VERSION} ouvindo em http://${HOST}:${PORT}`);
   log('Autenticacao: modo ' + AUTH_MODE + (AUTH_MODE === 'soft'
     ? ' (requisicoes sem token sao aceitas; use PDV_AUTH_MODE=strict apos atualizar o front-end)'
     : ' (token obrigatorio)'));

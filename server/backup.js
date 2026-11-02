@@ -1,7 +1,7 @@
 'use strict';
 
 // =====================================================================
-// System PDV PRO — backup automatico do banco SQLite.
+// DS PDV PRO — backup automatico do banco SQLite.
 //  - Backup online (API db.backup do better-sqlite3), sem parar as vendas.
 //  - Um backup por dia, apos a hora configurada (padrao 23h) e tambem um
 //    imediato se ainda nao existir nenhum.
@@ -13,8 +13,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const PREFIXO_ARQ = 'system_pdv_pro-';
-const RE_ARQ = /^system_pdv_pro-(auto|manual|pre-restore)-(\d{8})-(\d{6})\.db$/;
+const PREFIXO_ARQ = 'ds_pdv_pro-';
+const RE_ARQ = /^ds_pdv_pro-(auto|manual|pre-restore)-(\d{8})-(\d{6})\.db$/;
 
 function pad(n) { return String(n).padStart(2, '0'); }
 
@@ -83,7 +83,7 @@ function validarArquivoBanco(Database, arquivo) {
     );
     const faltando = obrigatorias.filter((t) => !tabelas.has(t));
     if (faltando.length) {
-      return { ok: false, erro: 'nao parece um banco do System PDV PRO (faltam: ' + faltando.join(', ') + ')' };
+      return { ok: false, erro: 'nao parece um banco do DS PDV PRO (faltam: ' + faltando.join(', ') + ')' };
     }
     return { ok: true };
   } catch (e) {

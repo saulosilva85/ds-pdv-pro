@@ -1,6 +1,6 @@
 name: Build Windows Installer
 
-# Gera o instalador "System PDV PRO_2.0.0_x64-setup.exe" (Tauri 2 / NSIS)
+# Gera o instalador "DS PDV PRO_2.0.0_x64-setup.exe" (Tauri 2 / NSIS)
 # com o servidor Node + SQLite e o runtime Node embutidos.
 
 on:
@@ -125,7 +125,7 @@ jobs:
       - name: Upload instalador
         uses: actions/upload-artifact@v4
         with:
-          name: System-PDV-PRO-setup
+          name: DS-PDV-PRO-setup
           path: |
             src-tauri/target/release/bundle/nsis/*-setup.exe
           if-no-files-found: error

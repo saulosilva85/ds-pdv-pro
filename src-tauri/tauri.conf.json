@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "System PDV PRO",
+  "productName": "DS PDV PRO",
   "version": "2.0.0",
-  "identifier": "com.systempdvpro.app",
+  "identifier": "com.dssolucoes.pdvpro",
   "build": {
     "frontendDist": "../dist",
     "beforeDevCommand": "npm run build:frontend",
@@ -12,7 +12,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "System PDV PRO",
+        "title": "DS PDV PRO",
         "width": 1280,
         "height": 800,
         "minWidth": 1024,

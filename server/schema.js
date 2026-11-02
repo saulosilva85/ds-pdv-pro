@@ -1,6 +1,6 @@
 'use strict';
 
-// Schema e seeds do System PDV PRO replicados 1:1 do contrato definido em
+// Schema e seeds do DS PDV PRO replicados 1:1 do contrato definido em
 // app.html (funcao criarEstrutura). O servidor cria as tabelas e os seeds
 // no boot, garantindo que login e operacao funcionem mesmo antes do
 // front-end rodar a sua propria criarEstrutura() (que e idempotente).

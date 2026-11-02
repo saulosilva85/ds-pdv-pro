@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>System PDV PRO</title>
+<title>DS PDV PRO</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;charset=UTF-8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128'><defs><linearGradient id='bg' x1='0%25' y1='0%25' x2='0%25' y2='100%25'><stop offset='0%25' stop-color='%231e3a8a'/><stop offset='100%25' stop-color='%232563eb'/></linearGradient></defs><rect width='128' height='128' rx='28' fill='url(%23bg)'/><g fill='none' stroke='white' stroke-width='7' stroke-linecap='round' stroke-linejoin='round'><path d='M24 36 L36 36 L40 40 L46 60'/><path d='M46 60 L98 60 L92 88 L54 88 Z'/><path d='M60 68 L58 82 M72 68 L72 82 M84 68 L86 82'/></g><circle cx='58' cy='100' r='8' fill='white'/><circle cx='58' cy='100' r='3' fill='%231e3a8a'/><circle cx='88' cy='100' r='8' fill='white'/><circle cx='88' cy='100' r='3' fill='%231e3a8a'/><circle cx='102' cy='40' r='14' fill='%23fbbf24' stroke='%23b48510' stroke-width='2'/><text x='102' y='46' text-anchor='middle' font-family='Arial Black, sans-serif' font-size='18' font-weight='900' fill='%23784a05'>$</text></svg>">
 
 <!-- Exportação funciona sem bibliotecas externas: CSV para Excel, impressão para PDF -->
@@ -524,7 +524,7 @@ table tr:hover td { background: #f8fafc; }
 <!-- TELA DE LOGIN -->
 <div class="login-container" id="loginScreen">
   <div class="login-box">
-    <h1><svg class="brand-cart-icon" viewBox="0 0 48 48" aria-hidden="true"><path d="M4 7h6l4.5 24h24L43 14H12" fill="#d1d5db" stroke="#6b7280" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M14 19h27M15 24h24M21 15l1 16M30 15l-1 16" fill="none" stroke="#9ca3af" stroke-width="1.4"/><path d="M14.5 31h24" fill="none" stroke="#2563eb" stroke-width="2" stroke-linecap="round"/><circle cx="19" cy="38" r="2.5" fill="#2563eb"/><circle cx="35" cy="38" r="2.5" fill="#2563eb"/></svg><span>System PDV PRO</span></h1>
+    <h1><svg class="brand-cart-icon" viewBox="0 0 48 48" aria-hidden="true"><path d="M4 7h6l4.5 24h24L43 14H12" fill="#d1d5db" stroke="#6b7280" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M14 19h27M15 24h24M21 15l1 16M30 15l-1 16" fill="none" stroke="#9ca3af" stroke-width="1.4"/><path d="M14.5 31h24" fill="none" stroke="#2563eb" stroke-width="2" stroke-linecap="round"/><circle cx="19" cy="38" r="2.5" fill="#2563eb"/><circle cx="35" cy="38" r="2.5" fill="#2563eb"/></svg><span>DS PDV PRO</span></h1>
     <p class="subtitle">Sistema de Frente de Loja</p>
     <!-- BUILD-MARKER: layout-fix-2026-05-30a -->
     <form id="loginForm">
@@ -546,7 +546,7 @@ table tr:hover td { background: #f8fafc; }
 <div class="app" id="app">
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-header">
-      <h2 style="display:flex;align-items:center;gap:7px"><svg class="brand-cart-icon" viewBox="0 0 48 48" aria-hidden="true"><path d="M4 7h6l4.5 24h24L43 14H12" fill="#d1d5db" stroke="#6b7280" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M14 19h27M15 24h24M21 15l1 16M30 15l-1 16" fill="none" stroke="#9ca3af" stroke-width="1.4"/><path d="M14.5 31h24" fill="none" stroke="#2563eb" stroke-width="2" stroke-linecap="round"/><circle cx="19" cy="38" r="2.5" fill="#2563eb"/><circle cx="35" cy="38" r="2.5" fill="#2563eb"/></svg><span>System PDV PRO</span></h2>
+      <h2 style="display:flex;align-items:center;gap:7px"><svg class="brand-cart-icon" viewBox="0 0 48 48" aria-hidden="true"><path d="M4 7h6l4.5 24h24L43 14H12" fill="#d1d5db" stroke="#6b7280" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M14 19h27M15 24h24M21 15l1 16M30 15l-1 16" fill="none" stroke="#9ca3af" stroke-width="1.4"/><path d="M14.5 31h24" fill="none" stroke="#2563eb" stroke-width="2" stroke-linecap="round"/><circle cx="19" cy="38" r="2.5" fill="#2563eb"/><circle cx="35" cy="38" r="2.5" fill="#2563eb"/></svg><span>DS PDV PRO</span></h2>
       <div class="user-info" id="userInfoSidebar">—</div>
     </div>
     <nav class="sidebar-menu">
@@ -1389,7 +1389,7 @@ table tr:hover td { background: #f8fafc; }
 
 <script>
 // =====================================================================
-// VERSÃO REDE — System PDV PRO v2.0
+// VERSÃO REDE — DS PDV PRO v2.0
 // =====================================================================
 // Esta cópia preserva 100% da interface (UI/UX) da v1.4.9 single-user e
 // substitui APENAS a camada de dados: em vez de SQL.js + localStorage,
@@ -1642,8 +1642,8 @@ let SQL = { Database: function() { return _remoteDb; } }; // stub
 let usuarioLogado = null;
 let carrinho = [];
 let produtosCache = [];
-const DB_KEY = 'system_pdv_pro_db_v1';
-const BACKUP_FOLDER_KEY = 'system_pdv_pro_backup_folder';
+const DB_KEY = 'ds_pdv_pro_db_v1';
+const BACKUP_FOLDER_KEY = 'ds_pdv_pro_backup_folder';
 
 // =============== SISTEMA DE PERMISSÕES ===============
 // Lista mestre de todas as permissões do sistema (itens do menu)
@@ -4379,7 +4379,7 @@ function montarHTMLCupom(vendaId, tipo) {
 
   // ── Rodapé ───────────────────────────────────────────────────────────
   html += `<tr><td class="cc" colspan="4">${emp.rodape || 'Obrigado pela preferência!'}</td></tr>`;
-  if (fiscal) html += '<tr><td class="cc" colspan="4" style="font-size:9px;color:#555">* Emitido via System PDV PRO *</td></tr>';
+  if (fiscal) html += '<tr><td class="cc" colspan="4" style="font-size:9px;color:#555">* Emitido via DS PDV PRO *</td></tr>';
   html += '</table></div>';
   return { html, numero: v.numero };
 }
@@ -4661,7 +4661,7 @@ function _escposCupom(vendaId, tipo, cols, vias, classe, abre) {
     if (classe !== 'vista' && via === vias - 1 && vias > 1) { bold(true); ln('*** VIA DO CLIENTE ***'); bold(false); }
     else if (classe === 'vista' && vias > 1) ln('-- Via ' + (via + 1) + '/' + vias + ' --');
     ln(clip(emp.rodape || 'Obrigado pela preferencia!', cols));
-    if (fiscal) ln('* Emitido via System PDV PRO *');
+    if (fiscal) ln('* Emitido via DS PDV PRO *');
     align(0);
     feed(3);
     raw(GS, 0x56, 0x01);  // corte parcial
@@ -4795,7 +4795,7 @@ function _imprimirReciboRecebimento(contaId, titulo, vias) {
   html += `<div>Forma: ${c.forma_recebimento || '-'}</div>`;
   html += '<div style="border-top:1px dashed #000;margin:8px 0"></div>';
   html += `<div style="text-align:center">${emp.rodape || 'Obrigado pela preferência!'}</div>`;
-  html += `<div style="text-align:center;font-size:9px;margin-top:8px">* Emitido via System PDV PRO *</div>`;
+  html += `<div style="text-align:center;font-size:9px;margin-top:8px">* Emitido via DS PDV PRO *</div>`;
   html += '</div>';
 
   let corpo = '';
@@ -7664,7 +7664,7 @@ function salvarConfigImpressora() {
 // reinicia automaticamente.
 async function fazerBackup() {
   const _bkd = new Date();
-  const nomeArq = 'pdv_pro_backup_' + _bkd.getFullYear() + '-' + String(_bkd.getMonth()+1).padStart(2,'0') + '-' + String(_bkd.getDate()).padStart(2,'0') + '.db';
+  const nomeArq = 'ds_pdv_pro_backup_' + _bkd.getFullYear() + '-' + String(_bkd.getMonth()+1).padStart(2,'0') + '-' + String(_bkd.getDate()).padStart(2,'0') + '.db';
   try {
     const blob = await new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
@@ -7928,7 +7928,7 @@ async function executarBackupAutomatico(silencioso = false) {
       String(agora.getDate()).padStart(2,'0') + '_' +
       String(agora.getHours()).padStart(2,'0') + 'h' +
       String(agora.getMinutes()).padStart(2,'0');
-    const nomeArq = 'pdv_pro_backup_' + ts + '.db';
+    const nomeArq = 'ds_pdv_pro_backup_' + ts + '.db';
     const blob = new Blob([data], { type: 'application/x-sqlite3' });
 
     if (_pdvIsTauri() && _autoBackupDirPath) {
@@ -7998,7 +7998,7 @@ window.addEventListener('beforeunload', function(e) {
       String(agora.getDate()).padStart(2,'0') + '_' +
       String(agora.getHours()).padStart(2,'0') + 'h' +
       String(agora.getMinutes()).padStart(2,'0');
-    const nomeArq = 'pdv_pro_backup_' + ts + '.db';
+    const nomeArq = 'ds_pdv_pro_backup_' + ts + '.db';
     const blob = new Blob([arr], { type: 'application/x-sqlite3' });
     _salvarBlobDownload(blob, nomeArq);
     try { mostrarProgressoBackup('Backup concluído!', 100); } catch(_){}
@@ -8187,7 +8187,7 @@ async function executarBackupAgendadoManual(silencioso) {
       String(agora.getDate()).padStart(2,'0') + '_' +
       String(agora.getHours()).padStart(2,'0') + 'h' +
       String(agora.getMinutes()).padStart(2,'0');
-    const nomeArq = 'pdv_pro_backup_agendado_' + ts + '.db';
+    const nomeArq = 'ds_pdv_pro_backup_agendado_' + ts + '.db';
     const blob = new Blob([data], { type: 'application/x-sqlite3' });
 
     // Tenta salvar direto na pasta se houver handle
@@ -9282,7 +9282,7 @@ document.addEventListener('fullscreenchange', () => {
         console.log('Sessão restaurada para', usuarioLogado && usuarioLogado.nome);
       }
     } catch(e) { console.warn('restaurarSessao falhou:', e); }
-    console.log('System PDV PRO (versão REDE) carregado — servidor: ' + NETWORK_BASE_URL);
+    console.log('DS PDV PRO (versão REDE) carregado — servidor: ' + NETWORK_BASE_URL);
   } catch (e) {
     console.error(e);
     // Em caso de falha de conexão com o servidor, oferece voltar ao setup.

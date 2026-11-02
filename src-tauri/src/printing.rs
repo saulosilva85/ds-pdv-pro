@@ -90,7 +90,7 @@ pub mod imp {
             })?;
 
             let result = (|| -> Result<(), String> {
-                let mut docname = wide("Cupom System PDV PRO");
+                let mut docname = wide("Cupom DS PDV PRO");
                 let mut datatype = wide("RAW");
                 let di = DOC_INFO_1W {
                     pDocName: PWSTR(docname.as_mut_ptr()),

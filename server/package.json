@@ -1,7 +1,7 @@
 {
-  "name": "system-pdv-pro-server",
+  "name": "ds-pdv-pro-server",
   "version": "2.2.0",
-  "description": "Servidor de rede (API + SQLite) do System PDV PRO",
+  "description": "Servidor de rede (API + SQLite) do DS PDV PRO",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

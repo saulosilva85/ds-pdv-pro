@@ -1,4 +1,4 @@
-// System PDV PRO — casca desktop (Tauri 2).
+// DS PDV PRO — casca desktop (Tauri 2).
 // Responsavel por: persistir config (modo/servidor/identificador), expor
 // hostname, e iniciar o servidor de rede embutido (Node + better-sqlite3)
 // quando esta maquina e o "Servidor". O front-end (index.html/app.html)
@@ -365,7 +365,7 @@ fn print_test(printer: String) -> Result<(), String> {
     data.extend_from_slice(&[0x1B, 0x45, 0x01]); // negrito
     data.extend_from_slice(b"TESTE DE IMPRESSAO\n");
     data.extend_from_slice(&[0x1B, 0x45, 0x00]);
-    data.extend_from_slice(b"System PDV PRO\n");
+    data.extend_from_slice(b"DS PDV PRO\n");
     data.extend_from_slice(b"--------------------------------\n");
     data.extend_from_slice(b"Impressora: ");
     data.extend_from_slice(printer.trim().as_bytes());
@@ -450,6 +450,6 @@ pub fn run() {
             save_file_bytes
         ])
         .build(tauri::generate_context!())
-        .expect("erro ao iniciar o System PDV PRO")
+        .expect("erro ao iniciar o DS PDV PRO")
         .run(|_, _| {});
 }

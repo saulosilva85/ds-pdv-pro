@@ -207,3 +207,11 @@ test('zerarDados: se falhar no meio, nada e apagado (transacao)', () => {
   assert.throws(() => zerarDados(db));
   assert.equal(db.prepare('SELECT COUNT(*) c FROM produtos').get().c, 1);
 });
+
+test('backup: novos arquivos usam o prefixo ds_pdv_pro', async () => {
+  const dir = tmp(), bdir = path.join(dir, 'bk');
+  const db = new Database(path.join(dir, 'j.db')); inicializarSchema(db, log);
+  const novo = await bkp.criarBackup(db, bdir, 'auto', new Date(2026, 10, 3, 23, 0, 0));
+  assert.match(path.basename(novo), /^ds_pdv_pro-auto-20261103-230000\.db$/);
+  assert.equal(bkp.listarBackups(bdir).length, 1);
+});

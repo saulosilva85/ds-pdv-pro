@@ -1,7 +1,7 @@
 'use strict';
 
 // =====================================================================
-// System PDV PRO — utilitarios de seguranca do servidor.
+// DS PDV PRO — utilitarios de seguranca do servidor.
 // Sem dependencias externas (somente modulos nativos do Node), para poder
 // ser testado isoladamente.
 // =====================================================================
