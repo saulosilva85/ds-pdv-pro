@@ -95,7 +95,14 @@ jobs:
           }
           try {
             if (-not $ok) { throw "Servidor nao respondeu em 30s" }
-            $login = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8765/api/auth/login" -ContentType "application/json" -Body '{"login":"master","senha":"master"}'
+            # A senha padrao do master nao fica escrita no workflow: o servidor
+            # aceita o proprio hash armazenado como credencial, e lemos esse hash do codigo.
+            Push-Location $dir
+            $hashMaster = ("" + (& $node -e "console.log(require('./schema').SENHA_PADRAO_MASTER_HASH)")).Trim()
+            Pop-Location
+            if (-not $hashMaster) { throw "Nao foi possivel ler o hash padrao do master" }
+            $corpo = @{ login = "master"; senha = $hashMaster } | ConvertTo-Json -Compress
+            $login = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8765/api/auth/login" -ContentType "application/json" -Body $corpo
             if (-not $login.token) { throw "Login nao devolveu token" }
             if ($login.usuario.PSObject.Properties.Name -contains "senha") { throw "Login devolveu a senha do usuario" }
             $recusou = $false

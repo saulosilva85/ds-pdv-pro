@@ -224,16 +224,22 @@ test('master: banco novo ja nasce com a senha padrao nova; a antiga "master" nao
   assert.ok(!sec.senhaConfere(m.senha, 'master', hashSenha));
 });
 
-test('migration v5: master com a senha antiga passa para a nova; senha escolhida pelo dono nao e tocada', () => {
-  const a = new Database(path.join(tmp(), 'l.db')); inicializarSchema(a, log);
-  a.prepare("UPDATE usuarios SET senha=? WHERE login='master'").run(SENHA_MASTER_ANTIGA_HASH);
-  a.exec('PRAGMA user_version = 4'); inicializarSchema(a, log);
-  assert.equal(a.prepare("SELECT senha FROM usuarios WHERE login='master'").get().senha, SENHA_PADRAO_MASTER_HASH);
-
-  const b = new Database(path.join(tmp(), 'm.db')); inicializarSchema(b, log);
-  b.prepare("UPDATE usuarios SET senha='Hcustom_1' WHERE login='master'").run();
-  b.exec('PRAGMA user_version = 4'); inicializarSchema(b, log);
-  assert.equal(b.prepare("SELECT senha FROM usuarios WHERE login='master'").get().senha, 'Hcustom_1');
+test('master: a cada inicializacao volta ao padrao (senha trocada, desativado ou nivel alterado)', () => {
+  const db = new Database(path.join(tmp(), 'l.db')); inicializarSchema(db, log);
+  const id = db.prepare("SELECT id FROM usuarios WHERE login='master'").get().id;
+  // senha antiga de fabrica (migracao) ...
+  db.prepare("UPDATE usuarios SET senha=? WHERE id=?").run(SENHA_MASTER_ANTIGA_HASH, id);
+  inicializarSchema(db, log);
+  assert.equal(db.prepare("SELECT senha FROM usuarios WHERE id=?").get(id).senha, SENHA_PADRAO_MASTER_HASH);
+  // ... senha escolhida em versao anterior, desativado e nivel rebaixado
+  db.prepare("UPDATE usuarios SET senha='Hcustom_1', ativo=0, nivel='admin' WHERE id=?").run(id);
+  inicializarSchema(db, log);
+  const m = db.prepare("SELECT senha, ativo, nivel FROM usuarios WHERE id=?").get(id);
+  assert.deepEqual({ ...m }, { senha: SENHA_PADRAO_MASTER_HASH, ativo: 1, nivel: 'master' });
+  // nao mexe nos demais usuarios
+  db.prepare("INSERT INTO usuarios (nome,login,senha,nivel,ativo) VALUES ('Ana','ana','Hana_1','caixa',1)").run();
+  inicializarSchema(db, log);
+  assert.equal(db.prepare("SELECT senha FROM usuarios WHERE login='ana'").get().senha, 'Hana_1');
 });
 
 test('zerarDados: o master recriado usa a senha padrao nova', () => {

@@ -37,7 +37,7 @@ const {
 const sec = require('./security');
 const bkp = require('./backup');
 
-const VERSION = '2.2.0';
+const VERSION = '2.3.0';
 const PORT = parseInt(process.env.PDV_PORT || '8765', 10);
 const HOST = process.env.PDV_HOST || '0.0.0.0';
 

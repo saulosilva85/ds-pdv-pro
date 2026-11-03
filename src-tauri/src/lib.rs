@@ -5,7 +5,7 @@
 // permanece inalterado e conversa com o servidor em http://localhost:8765.
 
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -18,6 +18,12 @@ use tauri::{AppHandle, Manager, State};
 mod printing;
 
 const SERVER_PORT: &str = "8765";
+
+// Versao do servidor embutido neste instalador. DEVE ser igual ao `VERSION` do
+// server/server.js (atualize os dois juntos). Serve para detectar um servidor
+// ANTIGO que ficou rodando em segundo plano depois de uma reinstalacao: ele
+// serviria o banco e as regras da versao anterior (ex.: senhas antigas).
+const EMBEDDED_SERVER_VERSION: &str = "2.3.0";
 
 #[derive(Default)]
 struct ServerState {
@@ -259,13 +265,63 @@ fn hostname() -> String {
     "pdv-host".to_string()
 }
 
+// Pergunta a versao ao servidor que atende a porta local (HTTP minimo, sem
+// dependencias extras). None = nao respondeu ou nao e um servidor do PDV.
+fn running_server_version() -> Option<String> {
+    let addr = SocketAddr::from(([127, 0, 0, 1], 8765));
+    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(500)).ok()?;
+    stream.set_read_timeout(Some(Duration::from_millis(1500))).ok()?;
+    stream.set_write_timeout(Some(Duration::from_millis(1500))).ok()?;
+    stream
+        .write_all(b"GET /api/identidade HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+        .ok()?;
+    let mut resp = String::new();
+    stream.read_to_string(&mut resp).ok()?;
+    let marker = "\"version\":\"";
+    let start = resp.find(marker)? + marker.len();
+    let end = resp[start..].find('"')?;
+    Some(resp[start..start + end].to_string())
+}
+
+// Encerra quem esta atendendo a porta do servidor (apenas Windows).
+#[cfg(windows)]
+fn stop_server_on_port() {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    let script = format!(
+        "Get-NetTCPConnection -LocalPort {} -State Listen -ErrorAction SilentlyContinue | ForEach-Object {{ Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }}",
+        SERVER_PORT
+    );
+    let _ = Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+}
+
+#[cfg(not(windows))]
+fn stop_server_on_port() {}
+
 #[tauri::command]
 fn start_embedded_server(app: AppHandle, state: State<ServerState>) -> Result<(), String> {
     // O servidor continua em segundo plano quando a janela do Servidor fecha.
     // Ao reabrir o app, reutiliza o processo que ja atende a porta da rede.
     let addr = SocketAddr::from(([127, 0, 0, 1], 8765));
     if TcpStream::connect_timeout(&addr, Duration::from_millis(300)).is_ok() {
-        return Ok(());
+        match running_server_version() {
+            // Servidor de uma versao diferente (instalacao anterior que ficou em
+            // segundo plano): encerra e sobe o desta instalacao.
+            Some(v) if v != EMBEDDED_SERVER_VERSION => {
+                stop_server_on_port();
+                for _ in 0..20 {
+                    std::thread::sleep(Duration::from_millis(250));
+                    if TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_err() {
+                        break;
+                    }
+                }
+            }
+            // Mesma versao (ou nao foi possivel identificar): reaproveita.
+            _ => return Ok(()),
+        }
     }
 
     // Idempotente dentro desta mesma instancia do desktop.

@@ -363,10 +363,25 @@ function aplicarSeeds(db) {
   }
 }
 
+// O usuario `master` e unico e fixo: senha padrao, ativo e nivel master. Se o
+// banco tiver sido alterado (senha trocada em versao anterior, usuario
+// desativado, restore de backup antigo...), ele volta ao padrao a cada
+// inicializacao do servidor.
+function garantirMaster(db, log) {
+  const m = db.prepare("SELECT id, senha, ativo, nivel FROM usuarios WHERE login = 'master'").get();
+  if (!m) return;
+  if (m.senha !== SENHA_PADRAO_MASTER_HASH || !m.ativo || m.nivel !== 'master') {
+    db.prepare("UPDATE usuarios SET senha = ?, ativo = 1, nivel = 'master' WHERE id = ?")
+      .run(SENHA_PADRAO_MASTER_HASH, m.id);
+    log('Usuario master restaurado ao padrao (senha/ativo/nivel).');
+  }
+}
+
 function inicializarSchema(db, log) {
   const logger = typeof log === 'function' ? log : () => {};
   executarMigrations(db, logger);
   aplicarSeeds(db);
+  garantirMaster(db, logger);
 }
 
 // Tabelas apagadas por "Zerar sistema" (mesma lista usada antes pelo front).
